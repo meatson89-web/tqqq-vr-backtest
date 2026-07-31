@@ -64,8 +64,15 @@ export const TQQQ_DATA = tqqqRaw;
 export const DATA_START = TQQQ_DATA[0][0];
 export const DATA_END = TQQQ_DATA[TQQQ_DATA.length - 1][0];
 
-// Default POOL booster: 60거래일 고점 대비 -25%↓ 시 주간 POOL 재투자 비율을 5%→25%로 상향
-export const DEFAULT_BOOSTER = { enabled: true, lookback: 60, drawdownPct: 25, ratioPct: 25 };
+// 전략 파라미터 기본값 (전부 UI에서 조정 가능)
+//  - 부스터: 60거래일 고점 대비 -25%↓ 시 주간 POOL 재투자 비율을 5%→25%로 상향
+//  - weeklyKRW: 수요일 정액 적립금 (기본 85만원)
+//  - poolCapKRW: 총자산이 이 금액 이하일 때 POOL 비중 10% 캡 적용 기준 (기본 2억)
+export const DEFAULT_SETTINGS = {
+  enabled: true, lookback: 60, drawdownPct: 25, ratioPct: 25,
+  weeklyKRW: 850_000, poolCapKRW: 200_000_000,
+};
+export const DEFAULT_BOOSTER = DEFAULT_SETTINGS;
 
 // Pre-compute indicators once over full dataset so rolling windows are fast
 const _closes = TQQQ_DATA.map(([, c]) => c);
@@ -77,7 +84,7 @@ function isWednesday(dateStr) {
   return new Date(dateStr + 'T00:00:00Z').getUTCDay() === 3;
 }
 
-export function runFinalBacktest(startDate, endDate, booster = DEFAULT_BOOSTER) {
+export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS) {
   const startIdx = TQQQ_DATA.findIndex(([d]) => d >= startDate);
   const endIdxRaw = TQQQ_DATA.findIndex(([d]) => d > endDate);
   const sliceEnd = endIdxRaw === -1 ? TQQQ_DATA.length : endIdxRaw;
@@ -86,9 +93,12 @@ export function runFinalBacktest(startDate, endDate, booster = DEFAULT_BOOSTER) 
     throw new Error('유효한 날짜 범위가 아닙니다');
   }
 
-  const boostActive = !!(booster && booster.enabled);
+  const booster = settings || DEFAULT_SETTINGS;
+  const boostActive = !!booster.enabled;
   const boostFrac = boostActive ? booster.ratioPct / 100 : 0;
   const boostDrawdownFrac = boostActive ? booster.drawdownPct / 100 : 0;
+  const weeklyKRW = booster.weeklyKRW ?? DEFAULT_SETTINGS.weeklyKRW;
+  const poolCapKRW = booster.poolCapKRW ?? DEFAULT_SETTINGS.poolCapKRW;
 
   let shares = 0, avgCost = 0, pool = 0, totalIn = 0;
   let cooldown = 0, sellNo = 0, started = false;
@@ -127,7 +137,7 @@ export function runFinalBacktest(startDate, endDate, booster = DEFAULT_BOOSTER) 
         trades.push({ date, priceUSD, returnPct: ret * 100, rsi, disp, poolAfter: pool, sellNo });
       }
 
-      // Weekly buy on Wednesdays: 85만원 + pool * 재투자비율(기본 5%, 부스터 조건 충족 시 상향)
+      // Weekly buy on Wednesdays: 적립금 + pool * 재투자비율(기본 5%, 부스터 조건 충족 시 상향)
       if (isWednesday(date)) {
         totalWeeks++;
         let poolRatio = 0.05;
@@ -136,16 +146,16 @@ export function runFinalBacktest(startDate, endDate, booster = DEFAULT_BOOSTER) 
           boostedWeeks++;
         }
         const boost = pool * poolRatio;
-        const buyAmt = 850_000 + boost;
+        const buyAmt = weeklyKRW + boost;
         const newShares = buyAmt / price;
         avgCost = (avgCost * shares + buyAmt) / (shares + newShares);
         shares += newShares;
         pool -= boost;
-        totalIn += 850_000;
+        totalIn += weeklyKRW;
 
-        // Pool cap: total <= 2억 and pool > total*10% → reinvest excess
+        // Pool cap: total <= poolCapKRW and pool > total*10% → reinvest excess
         const total = shares * price + pool;
-        if (total <= 200_000_000 && pool > total * 0.10) {
+        if (total <= poolCapKRW && pool > total * 0.10) {
           const excess = pool - total * 0.10;
           const extraShares = excess / price;
           avgCost = (avgCost * shares + excess) / (shares + extraShares);
@@ -157,7 +167,8 @@ export function runFinalBacktest(startDate, endDate, booster = DEFAULT_BOOSTER) 
 
     const stockValue = shares * price;
     const total = stockValue + pool;
-    daily.push({ date, priceUSD, rsi, disp, stockValue, pool, total, totalIn });
+    const boostCond = boostActive && !isNaN(rollMax) && priceUSD <= rollMax * (1 - boostDrawdownFrac);
+    daily.push({ date, priceUSD, rsi, disp, stockValue, pool, total, totalIn, boostCond });
   }
 
   if (!daily.length) throw new Error('백테스트 데이터가 없습니다');
@@ -188,7 +199,7 @@ export function runFinalBacktest(startDate, endDate, booster = DEFAULT_BOOSTER) 
 }
 
 // All 5-year windows (252*5 trading days), sliding by 63 days (one quarter)
-export function getRollingWindows(booster = DEFAULT_BOOSTER) {
+export function getRollingWindows(settings = DEFAULT_SETTINGS) {
   const WINDOW = 252 * 5;
   const SLIDE = 63;
   const result = [];
@@ -197,7 +208,7 @@ export function getRollingWindows(booster = DEFAULT_BOOSTER) {
     const startDate = TQQQ_DATA[start][0];
     const endDate = TQQQ_DATA[start + WINDOW - 1][0];
     try {
-      const { stats } = runFinalBacktest(startDate, endDate, booster);
+      const { stats } = runFinalBacktest(startDate, endDate, settings);
       result.push({ id: id++, startDate, endDate, stats });
     } catch (_) {
       // skip windows with insufficient data
