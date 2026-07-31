@@ -66,11 +66,12 @@ export const DATA_END = TQQQ_DATA[TQQQ_DATA.length - 1][0];
 
 // 전략 파라미터 기본값 (전부 UI에서 조정 가능)
 //  - 부스터: 60거래일 고점 대비 -25%↓ 시 주간 POOL 재투자 비율을 5%→25%로 상향
+//  - initialKRW: 시작일 일시 매수 초기 투입금 (기본 1억)
 //  - weeklyKRW: 수요일 정액 적립금 (기본 85만원)
 //  - poolCapKRW: 총자산이 이 금액 이하일 때 POOL 비중 10% 캡 적용 기준 (기본 2억)
 export const DEFAULT_SETTINGS = {
   enabled: true, lookback: 60, drawdownPct: 25, ratioPct: 25,
-  weeklyKRW: 850_000, poolCapKRW: 200_000_000,
+  initialKRW: 100_000_000, weeklyKRW: 850_000, poolCapKRW: 200_000_000,
 };
 export const DEFAULT_BOOSTER = DEFAULT_SETTINGS;
 
@@ -99,6 +100,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   const boostDrawdownFrac = boostActive ? booster.drawdownPct / 100 : 0;
   const weeklyKRW = booster.weeklyKRW ?? DEFAULT_SETTINGS.weeklyKRW;
   const poolCapKRW = booster.poolCapKRW ?? DEFAULT_SETTINGS.poolCapKRW;
+  const initialKRW = booster.initialKRW ?? DEFAULT_SETTINGS.initialKRW;
 
   let shares = 0, avgCost = 0, pool = 0, totalIn = 0;
   let cooldown = 0, sellNo = 0, started = false;
@@ -114,9 +116,9 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
 
     if (!started) {
       // Day 0: lump-sum initial buy
-      shares = 100_000_000 / price;
+      shares = initialKRW / price;
       avgCost = price;
-      totalIn = 100_000_000;
+      totalIn = initialKRW;
       started = true;
     } else {
       const ret = avgCost > 0 ? (price - avgCost) / avgCost : 0;
