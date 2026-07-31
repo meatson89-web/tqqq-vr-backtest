@@ -1,0 +1,15 @@
+import { chromium } from 'playwright';
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+const errors = [];
+page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
+await page.goto('http://localhost:5173', { waitUntil: 'networkidle' });
+await page.click('text=백테스트 실행');
+await page.waitForSelector('text=매매 로그');
+const chart = await page.$('.chart-wrap');
+await chart.screenshot({ path: 'tmp_chart.png' });
+const trades = await page.$('.trades');
+await trades.screenshot({ path: 'tmp_trades.png' });
+console.log('ERRORS:', JSON.stringify(errors));
+await browser.close();

@@ -1,0 +1,23 @@
+import { chromium } from 'playwright';
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1400, height: 1200 } });
+await page.goto('https://mks.nexuslogic.cloud/', { waitUntil: 'networkidle' });
+await page.waitForTimeout(1000);
+await page.getByRole('button', { name: 'VR 5.0', exact: true }).click();
+await page.waitForTimeout(500);
+
+const inputs = page.locator('input, select, button');
+await inputs.nth(6).fill('67190');
+await inputs.nth(8).fill('67190');
+await inputs.nth(16).click();
+await inputs.nth(17).fill('1150');
+await inputs.nth(18).click();
+await inputs.nth(12).fill('2010-05-13');
+await inputs.nth(24).fill('2015-05-14');
+await page.waitForTimeout(200);
+await inputs.nth(25).click();
+await page.waitForTimeout(2000);
+const bodyText = await page.evaluate(() => document.body.innerText);
+console.log(bodyText.split('\n').slice(0, 60).join('\n'));
+await page.screenshot({ path: 'tmp_mks_early.png', fullPage: true });
+await browser.close();

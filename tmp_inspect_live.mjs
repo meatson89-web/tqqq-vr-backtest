@@ -1,0 +1,16 @@
+import { chromium } from 'playwright';
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
+const errors = [];
+page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
+await page.goto('https://tqqq-vr-backtest.pages.dev', { waitUntil: 'networkidle' });
+await page.waitForTimeout(1000);
+const bodyText = await page.evaluate(() => document.body.innerText);
+console.log('=== BODY TEXT (first 4000 chars) ===');
+console.log(bodyText.slice(0, 4000));
+console.log('=== ERRORS ===', JSON.stringify(errors));
+const inputs = await page.$$eval('input', els => els.map(e => ({type: e.type, value: e.value, max: e.max, min: e.min, name: e.name})));
+console.log('=== INPUTS ===', JSON.stringify(inputs));
+await page.screenshot({ path: 'tmp_live_full.png', fullPage: true });
+await browser.close();
