@@ -79,7 +79,13 @@ export const DEFAULT_BOOSTER = DEFAULT_SETTINGS;
 const _closes = TQQQ_DATA.map(([, c]) => c);
 const _rsi = calcRSI(_closes, 14);
 const _disp = calcDisparity(_closes, 180);
-const _roll60max = calcRollMax(_closes, 60);
+
+// 부스터 lookback은 UI에서 바뀔 수 있으므로 값별로 캐시해서 재사용
+const _rollMaxCache = {};
+function getRollMaxArr(lookback) {
+  if (!_rollMaxCache[lookback]) _rollMaxCache[lookback] = calcRollMax(_closes, lookback);
+  return _rollMaxCache[lookback];
+}
 
 function isWednesday(dateStr) {
   return new Date(dateStr + 'T00:00:00Z').getUTCDay() === 3;
@@ -101,18 +107,20 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   const weeklyKRW = booster.weeklyKRW ?? DEFAULT_SETTINGS.weeklyKRW;
   const poolCapKRW = booster.poolCapKRW ?? DEFAULT_SETTINGS.poolCapKRW;
   const initialKRW = booster.initialKRW ?? DEFAULT_SETTINGS.initialKRW;
+  const lookback = booster.lookback ?? DEFAULT_SETTINGS.lookback;
+  const rollMaxArr = boostActive ? getRollMaxArr(lookback) : null;
 
   let shares = 0, avgCost = 0, pool = 0, totalIn = 0;
   let cooldown = 0, sellNo = 0, started = false;
   let boostedWeeks = 0, totalWeeks = 0;
-  const daily = [], trades = [];
+  const daily = [], trades = [], boostTrades = [];
 
   for (let i = startIdx; i < sliceEnd; i++) {
     const [date, priceUSD] = TQQQ_DATA[i];
     const price = priceUSD * 1350;
     const rsi = _rsi[i];
     const disp = _disp[i];
-    const rollMax = _roll60max[i];
+    const rollMax = rollMaxArr ? rollMaxArr[i] : NaN;
 
     if (!started) {
       // Day 0: lump-sum initial buy
@@ -143,11 +151,19 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
       if (isWednesday(date)) {
         totalWeeks++;
         let poolRatio = 0.05;
+        let wasBoosted = false;
         if (boostActive && !isNaN(rollMax) && priceUSD <= rollMax * (1 - boostDrawdownFrac)) {
           poolRatio = boostFrac;
           boostedWeeks++;
+          wasBoosted = true;
         }
         const boost = pool * poolRatio;
+        if (wasBoosted && boost > 0) {
+          boostTrades.push({
+            date, priceUSD, poolBefore: pool, ratioPct: poolRatio * 100,
+            buyAmt: boost, poolAfter: pool - boost,
+          });
+        }
         const buyAmt = weeklyKRW + boost;
         const newShares = buyAmt / price;
         avgCost = (avgCost * shares + buyAmt) / (shares + newShares);
@@ -197,7 +213,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
     totalWeeks,
   };
 
-  return { daily, trades, stats };
+  return { daily, trades, boostTrades, stats };
 }
 
 // All 5-year windows (252*5 trading days), sliding by 63 days (one quarter)
@@ -217,4 +233,74 @@ export function getRollingWindows(settings = DEFAULT_SETTINGS) {
     }
   }
   return result;
+}
+
+// ── 부스터 상황판: 최신 데이터 기준 현재 부스터 on/off 상태 ──────────────────
+export function getBoosterStatus(settings = DEFAULT_SETTINGS) {
+  const lookback = settings.lookback ?? DEFAULT_SETTINGS.lookback;
+  const drawdownPct = settings.drawdownPct ?? DEFAULT_SETTINGS.drawdownPct;
+  const rollArr = getRollMaxArr(lookback);
+  const n = TQQQ_DATA.length;
+  const lastIdx = n - 1;
+  const price = _closes[lastIdx];
+  const rollMax = rollArr[lastIdx];
+
+  let hiIdx = lastIdx;
+  for (let j = Math.max(0, lastIdx - lookback + 1); j <= lastIdx; j++) {
+    if (_closes[j] === rollMax) { hiIdx = j; break; }
+  }
+
+  const drawdownFrac = drawdownPct / 100;
+  const offPrice = rollMax * (1 - drawdownFrac);
+  const ddNow = (price / rollMax - 1) * 100;
+  const boosterOn = !!settings.enabled && price <= offPrice;
+  const daysSincePeak = lastIdx - hiIdx;
+  const daysUntilRolloff = Math.max(0, lookback - daysSincePeak - 1);
+
+  return {
+    date: TQQQ_DATA[lastIdx][0], price, lookback, drawdownPct,
+    rollMax, rollMaxDate: TQQQ_DATA[hiIdx][0],
+    ddNow, boosterOn, offPrice, offPct: (offPrice / price - 1) * 100,
+    daysSincePeak, daysUntilRolloff, enabled: !!settings.enabled,
+  };
+}
+
+// ── 매도조건 상황판: RSI/이격도 현재값 + 목표가 도달 시나리오 ────────────────
+export function getSellConditionStatus() {
+  const n = TQQQ_DATA.length;
+  const lastIdx = n - 1;
+  const priceUSD = _closes[lastIdx];
+  const rsiNow = _rsi[lastIdx];
+  const dispNow = _disp[lastIdx];
+  const ma180 = priceUSD / (1 + dispNow / 100);
+  const targetPrice = ma180 * 1.40;
+  const neededPct = (targetPrice / priceUSD - 1) * 100;
+
+  const scenarios = [3, 5, 7, 10, 15, 20, 30].map(days => {
+    const dailyMult = Math.pow(targetPrice / priceUSD, 1 / days);
+    const sim = _closes.slice(0, n);
+    for (let k = 1; k <= days; k++) sim.push(sim[sim.length - 1] * dailyMult);
+    const simRsi = calcRSI(sim, 14);
+    const projectedRsi = simRsi[sim.length - 1];
+    return { days, dailyPct: (dailyMult - 1) * 100, projectedRsi, meets: projectedRsi >= 70 };
+  });
+
+  return {
+    date: TQQQ_DATA[lastIdx][0], priceUSD, rsiNow, dispNow, ma180,
+    targetPrice, neededPct,
+    rsiMet: rsiNow >= 70, dispMet: dispNow > 40,
+    scenarios,
+  };
+}
+
+// 사용자가 입력한 평단가(USD) 기준 수익률 조건 판정
+export function checkGainCondition(avgCostUSD) {
+  const n = TQQQ_DATA.length;
+  const priceUSD = _closes[n - 1];
+  const gainPct = (priceUSD - avgCostUSD) / avgCostUSD * 100;
+  const targetPriceFor25 = avgCostUSD * 1.25;
+  return {
+    priceUSD, gainPct, meets: gainPct >= 25,
+    targetPriceFor25, neededPct: (targetPriceFor25 / priceUSD - 1) * 100,
+  };
 }

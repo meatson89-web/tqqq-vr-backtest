@@ -3,7 +3,10 @@ import {
   ResponsiveContainer, ComposedChart, Area, Line, Scatter, ReferenceArea,
   XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts'
-import { getRollingWindows, runFinalBacktest, DEFAULT_SETTINGS, DATA_START, DATA_END } from './lib/backtest'
+import {
+  getRollingWindows, runFinalBacktest, DEFAULT_SETTINGS, DATA_START, DATA_END,
+  getBoosterStatus, getSellConditionStatus, checkGainCondition,
+} from './lib/backtest'
 import './App.css'
 
 function fmtPct(v) {
@@ -163,10 +166,13 @@ function Sidebar({ view, onSelect }) {
   const items = [
     { id: 'rolling', label: '5년 롤링 윈도우' },
     { id: 'custom', label: '직접 기간 설정' },
+    { id: 'boosterStatus', label: '부스터 상황판' },
+    { id: 'sellStatus', label: '매도조건 상황판' },
     { id: 'info', label: '전략 설명 보기' },
   ]
   return (
     <nav className="sidebar">
+      <div className="sidebar-title">메뉴</div>
       {items.map(it => (
         <button
           key={it.id}
@@ -177,6 +183,128 @@ function Sidebar({ view, onSelect }) {
         </button>
       ))}
     </nav>
+  )
+}
+
+function StatusItem({ label, value, tone }) {
+  return (
+    <div className={`status-item${tone ? ' ' + tone : ''}`}>
+      <span className="label">{label}</span>
+      <span className="value">{value}</span>
+    </div>
+  )
+}
+
+function BoosterStatusPanel({ settings }) {
+  const s = useMemo(() => getBoosterStatus(settings), [settings])
+  if (!s.enabled) {
+    return (
+      <div className="rules-panel">
+        <h3 className="panel-heading">부스터 상황판</h3>
+        <p style={{ color: '#9ca3af', fontSize: 13, textAlign: 'left' }}>
+          현재 파라미터 패널에서 POOL 부스터가 꺼져 있습니다. 켜고 "적용"을 누르면 현재 상황이 표시됩니다.
+        </p>
+      </div>
+    )
+  }
+  return (
+    <div className="rules-panel">
+      <h3 className="panel-heading">부스터 상황판 <span style={{ fontWeight: 400, fontSize: 12, color: '#6b7280' }}>(기준일 {s.date}, 매일 자동 갱신)</span></h3>
+      <div style={{ marginBottom: 14 }}>
+        <span className={`status-badge ${s.boosterOn ? 'on' : 'off'}`}>
+          {s.boosterOn ? '🟠 부스터 ON (재투자 비율 상향 중)' : '⚪ 부스터 OFF (기본 5%)'}
+        </span>
+      </div>
+      <div className="status-grid">
+        <StatusItem label="최신 종가" value={`$${s.price.toFixed(2)}`} />
+        <StatusItem label={`${s.lookback}거래일 고점`} value={`$${s.rollMax.toFixed(2)}`} />
+        <StatusItem label="고점 발생일" value={s.rollMaxDate} />
+        <StatusItem label="현재 고점대비" value={`${s.ddNow.toFixed(1)}%`} tone={s.ddNow <= -s.drawdownPct ? 'warn' : undefined} />
+        <StatusItem label="OFF 전환 가격" value={`$${s.offPrice.toFixed(2)} (${s.offPct >= 0 ? '+' : ''}${s.offPct.toFixed(1)}%)`} />
+        <StatusItem label="고점 경과" value={`${s.daysSincePeak}거래일`} />
+        <StatusItem label={`${s.lookback}일 창 이탈까지`} value={`${s.daysUntilRolloff}거래일`} />
+      </div>
+      <p style={{ color: '#9ca3af', fontSize: 12, textAlign: 'left', marginTop: 10 }}>
+        가격이 OFF 전환 가격 이상으로 오르거나, 고점이 {s.lookback}일 창에서 밀려나 기준 고점 자체가 낮아지면 부스터가 꺼집니다.
+      </p>
+    </div>
+  )
+}
+
+function SellStatusPanel() {
+  const s = useMemo(() => getSellConditionStatus(), [])
+  const [avgCostInput, setAvgCostInput] = useState('')
+  const [gain, setGain] = useState(null)
+
+  const calc = () => {
+    const v = Number(avgCostInput)
+    if (!v || v <= 0) return
+    setGain(checkGainCondition(v))
+  }
+
+  const allMet = s.rsiMet && s.dispMet && gain?.meets
+
+  return (
+    <div className="rules-panel">
+      <h3 className="panel-heading">매도조건 상황판 <span style={{ fontWeight: 400, fontSize: 12, color: '#6b7280' }}>(기준일 {s.date}, 매일 자동 갱신)</span></h3>
+      <div className="status-grid">
+        <StatusItem label="TQQQ 현재가" value={`$${s.priceUSD.toFixed(2)}`} />
+        <StatusItem label="RSI(14)" value={s.rsiNow.toFixed(1)} tone={s.rsiMet ? 'ok' : undefined} />
+        <StatusItem label="180일 이격도" value={`${s.dispNow.toFixed(1)}%`} tone={s.dispMet ? 'ok' : undefined} />
+        <StatusItem label="이격도 40% 도달가" value={`$${s.targetPrice.toFixed(2)} (+${s.neededPct.toFixed(1)}%)`} />
+      </div>
+
+      <div className="sub-heading" style={{ color: '#9ca3af' }}>목표가 도달 기간별 예상 RSI</div>
+      <table className="sell-table">
+        <thead>
+          <tr>
+            <th style={{ textAlign: 'left' }}>도달 기간</th>
+            <th>일평균 상승률</th>
+            <th>예상 RSI</th>
+            <th>RSI조건</th>
+          </tr>
+        </thead>
+        <tbody>
+          {s.scenarios.map(sc => (
+            <tr key={sc.days}>
+              <td style={{ textAlign: 'left' }}>{sc.days}거래일</td>
+              <td>+{sc.dailyPct.toFixed(2)}%/일</td>
+              <td>{sc.projectedRsi.toFixed(1)}</td>
+              <td style={{ color: sc.meets ? '#10b981' : '#ef4444' }}>{sc.meets ? '충족' : '미달'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div className="param-divider" />
+      <div style={{ textAlign: 'left', fontSize: 13, color: '#e2e8f0', marginBottom: 4 }}>
+        세 번째 조건(평단가 대비 수익률 25%↑)은 보유 포지션의 평단가를 입력해야 계산됩니다.
+      </div>
+      <div className="gain-form">
+        <label style={{ fontSize: 13, color: '#9ca3af', display: 'flex', alignItems: 'center', gap: 8 }}>
+          평단가(USD)
+          <input type="number" min={0} step={0.01} value={avgCostInput}
+            onChange={e => setAvgCostInput(e.target.value)} placeholder="예: 55.00" />
+        </label>
+        <button type="button" className="run-btn" style={{ marginTop: 0, padding: '8px 20px', fontSize: 13 }} onClick={calc}>
+          계산
+        </button>
+      </div>
+
+      {gain && (
+        <div style={{ marginTop: 14 }}>
+          <div className="status-grid">
+            <StatusItem label="현재 수익률" value={`${gain.gainPct >= 0 ? '+' : ''}${gain.gainPct.toFixed(1)}%`} tone={gain.meets ? 'ok' : undefined} />
+            <StatusItem label="25% 도달가" value={`$${gain.targetPriceFor25.toFixed(2)} (${gain.neededPct >= 0 ? '+' : ''}${gain.neededPct.toFixed(1)}%)`} />
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <span className={`status-badge ${allMet ? 'triggered' : 'off'}`}>
+              {allMet ? '🔴 지금 매도조건 전부 충족!' : `아직 미충족 (RSI ${s.rsiMet ? 'O' : 'X'} / 이격도 ${s.dispMet ? 'O' : 'X'} / 수익률 ${gain.meets ? 'O' : 'X'})`}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -242,7 +370,7 @@ function CustomTooltip({ active, payload, label }) {
 }
 
 function BacktestDetail({ window: win, settings }) {
-  const { daily, trades, stats } = useMemo(
+  const { daily, trades, boostTrades, stats } = useMemo(
     () => runFinalBacktest(win.startDate, win.endDate, settings),
     [win.startDate, win.endDate, settings]
   )
@@ -381,6 +509,38 @@ function BacktestDetail({ window: win, settings }) {
           ))}
         </tbody>
       </table>
+
+      {settings.enabled && (
+        <>
+          <div className="sub-heading">부스터 매수 내역 ({boostTrades.length}회)</div>
+          <table className="sell-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th style={{ textAlign: 'left' }}>날짜</th>
+                <th>가격$</th>
+                <th>POOL(전)</th>
+                <th>비율</th>
+                <th>매수금액</th>
+                <th>POOL(후)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {boostTrades.map((b, i) => (
+                <tr key={`${b.date}-${i}`}>
+                  <td>{i + 1}</td>
+                  <td style={{ textAlign: 'left' }}>{b.date}</td>
+                  <td>${b.priceUSD.toFixed(2)}</td>
+                  <td>{fmtB(b.poolBefore)}</td>
+                  <td>{b.ratioPct.toFixed(0)}%</td>
+                  <td>{fmtB(b.buyAmt)}</td>
+                  <td>{fmtB(b.poolAfter)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </section>
   )
 }
@@ -409,6 +569,8 @@ function App() {
         <Sidebar view={view} onSelect={id => { setView(id); if (id !== 'custom') setSel(null) }} />
         <div className="main-content">
           {view === 'info' && <StrategyInfo />}
+          {view === 'boosterStatus' && <BoosterStatusPanel settings={settings} />}
+          {view === 'sellStatus' && <SellStatusPanel />}
 
           {view === 'custom' && (
             <>
