@@ -72,6 +72,10 @@ export const DATA_END = TQQQ_DATA[TQQQ_DATA.length - 1][0];
 export const DEFAULT_SETTINGS = {
   enabled: true, lookback: 60, drawdownPct: 25, ratioPct: 25,
   initialKRW: 100_000_000, weeklyKRW: 850_000, poolCapKRW: 200_000_000,
+  // 완화매도: 마지막 수익실현 매도 후 relaxMonths개월 이상 지나면 RSI/이격도
+  // 기준을 낮춰서 매도(수익률 25% 기준은 유지), 매도 비율도 relaxSellFrac로 축소.
+  // 46개 롤링 구간 스윕 검증값(평균 총자산 +1.8%, 2018-08 미스 케이스 해결)이 기본값.
+  relaxEnabled: false, relaxMonths: 7, relaxRsiDrop: 0, relaxDispDrop: 12, relaxSellFrac: 0.05,
 };
 export const DEFAULT_BOOSTER = DEFAULT_SETTINGS;
 
@@ -90,6 +94,8 @@ function getRollMaxArr(lookback) {
 function isWednesday(dateStr) {
   return new Date(dateStr + 'T00:00:00Z').getUTCDay() === 3;
 }
+
+const TRADING_DAYS_PER_MONTH = 21;
 
 export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS) {
   const startIdx = TQQQ_DATA.findIndex(([d]) => d >= startDate);
@@ -110,9 +116,17 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   const lookback = booster.lookback ?? DEFAULT_SETTINGS.lookback;
   const rollMaxArr = boostActive ? getRollMaxArr(lookback) : null;
 
+  const relaxEnabled = !!booster.relaxEnabled;
+  const relaxMonths = booster.relaxMonths ?? DEFAULT_SETTINGS.relaxMonths;
+  const relaxRsiDrop = booster.relaxRsiDrop ?? DEFAULT_SETTINGS.relaxRsiDrop;
+  const relaxDispDrop = booster.relaxDispDrop ?? DEFAULT_SETTINGS.relaxDispDrop;
+  const relaxSellFrac = booster.relaxSellFrac ?? DEFAULT_SETTINGS.relaxSellFrac;
+  const relaxDays = relaxMonths * TRADING_DAYS_PER_MONTH;
+
   let shares = 0, avgCost = 0, pool = 0, totalIn = 0;
   let cooldown = 0, sellNo = 0, started = false;
   let boostedWeeks = 0, totalWeeks = 0;
+  let lastSellIdx = startIdx;
   const daily = [], trades = [], boostTrades = [];
 
   for (let i = startIdx; i < sliceEnd; i++) {
@@ -128,23 +142,33 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
       avgCost = price;
       totalIn = initialKRW;
       started = true;
+      lastSellIdx = i;
     } else {
       const ret = avgCost > 0 ? (price - avgCost) / avgCost : 0;
+      const relaxActive = relaxEnabled && (i - lastSellIdx >= relaxDays);
+      const effRsi = relaxActive ? 70 - relaxRsiDrop : 70;
+      const effDisp = relaxActive ? 40 - relaxDispDrop : 40;
       // Cooldown: decrement or check sell (matches Python if/else structure)
       if (cooldown > 0) {
         cooldown--;
       } else if (
-        !isNaN(rsi) && rsi >= 70 &&
-        !isNaN(disp) && disp > 40 &&
+        !isNaN(rsi) && rsi >= effRsi &&
+        !isNaN(disp) && disp > effDisp &&
         ret >= 0.25
       ) {
-        const sellShares = shares * 0.70;
+        // A sell that would have fired at the normal 70/40 bar anyway keeps
+        // the normal 70% sell size; only a sell that needed the relaxed bar
+        // uses the smaller relaxSellFrac.
+        const normalFire = rsi >= 70 && disp > 40;
+        const sellFrac = normalFire ? 0.70 : relaxSellFrac;
+        const sellShares = shares * sellFrac;
         const sellValue = sellShares * price;
         shares -= sellShares;
         pool += sellValue;
         cooldown = 10;
         sellNo++;
-        trades.push({ date, priceUSD, returnPct: ret * 100, rsi, disp, poolAfter: pool, sellNo });
+        lastSellIdx = i;
+        trades.push({ date, priceUSD, returnPct: ret * 100, rsi, disp, poolAfter: pool, sellNo, relaxed: !normalFire });
       }
 
       // Weekly buy on Wednesdays: 적립금 + pool * 재투자비율(기본 5%, 부스터 조건 충족 시 상향)
@@ -206,6 +230,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
     finalPool: last.pool,
     totalIn,
     sellCount: trades.length,
+    relaxedSellCount: trades.filter(t => t.relaxed).length,
     days,
     startDate: daily[0].date,
     endDate: last.date,

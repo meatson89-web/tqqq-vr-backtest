@@ -68,6 +68,13 @@ function StrategyInfo() {
           약세장에서는 평단가를 오히려 높일 수 있다는 점이 백테스트로 확인됐습니다.
         </p>
         <p>
+          <b>완화매도(옵션)</b> — 마지막 수익실현 매도로부터 설정한 개월 수(기본 7개월) 이상
+          지나면, RSI·이격도 기준을 설정한 폭만큼 낮춰서(수익률 25% 기준은 그대로) 매도를
+          시도합니다. 이때는 보유 주식을 70%가 아니라 설정한 작은 비율(기본 5%)만 팔아
+          POOL을 조금씩 확보합니다. 46개 롤링 5년 구간 검증 결과 27개 구간에서 개선(평균
+          +3.0%), 19개 구간에서 소폭 악화(평균 -1.0%)되어 전체 평균 총자산은 +1.8%였습니다.
+        </p>
+        <p>
           <b>파라미터</b> — 초기 투입금, 수요일 적립금, POOL 비중캡 기준, 부스터 조건은 상단
           파라미터 패널에서 직접 바꾸고 "적용"을 누르면 모든 백테스트(롤링 윈도우 + 직접 기간 설정)에
           한번에 반영됩니다.
@@ -119,6 +126,23 @@ function ParametersPanel({ draft, onDraftChange, onApply, dirty }) {
         {numField('기준 고점 기간', draft.lookback, v => set('lookback', v), { min: 5, max: 250, step: 5, unit: '거래일', disabled: !draft.enabled })}
         {numField('하락 임계치', draft.drawdownPct, v => set('drawdownPct', v), { min: 5, max: 70, step: 1, unit: '%', disabled: !draft.enabled })}
         {numField('재투자 비율', draft.ratioPct, v => set('ratioPct', v), { min: 5, max: 200, step: 1, unit: '%', disabled: !draft.enabled })}
+      </div>
+
+      <div className="param-divider" />
+
+      <label className="param-checkbox">
+        <input
+          type="checkbox"
+          checked={draft.relaxEnabled}
+          onChange={e => set('relaxEnabled', e.target.checked)}
+        />
+        완화매도 사용 (오래 매도 못하면 RSI·이격도 기준 낮춰서 매도)
+      </label>
+      <div className="param-grid">
+        {numField('미매도 기준', draft.relaxMonths, v => set('relaxMonths', v), { min: 1, max: 24, step: 1, unit: '개월', disabled: !draft.relaxEnabled })}
+        {numField('RSI 완화폭', draft.relaxRsiDrop, v => set('relaxRsiDrop', v), { min: 0, max: 40, step: 1, unit: 'p', disabled: !draft.relaxEnabled })}
+        {numField('이격도 완화폭', draft.relaxDispDrop, v => set('relaxDispDrop', v), { min: 0, max: 40, step: 1, unit: 'p', disabled: !draft.relaxEnabled })}
+        {numField('완화매도 비율', draft.relaxSellFrac * 100, v => set('relaxSellFrac', v / 100), { min: 1, max: 70, step: 1, unit: '%', disabled: !draft.relaxEnabled })}
       </div>
 
       <button type="button" className="run-btn apply-btn" onClick={onApply} disabled={!dirty}>
@@ -445,6 +469,12 @@ function BacktestDetail({ window: win, settings }) {
             <span className="value">{stats.boostedWeeks}/{stats.totalWeeks}주</span>
           </div>
         )}
+        {settings.relaxEnabled && (
+          <div className="stat-item">
+            <span className="label">완화매도 발동</span>
+            <span className="value">{stats.relaxedSellCount}/{stats.sellCount}회</span>
+          </div>
+        )}
       </div>
 
       <ResponsiveContainer width="100%" height={380}>
@@ -491,6 +521,7 @@ function BacktestDetail({ window: win, settings }) {
             <th>RSI</th>
             <th>이격도</th>
             <th>POOL잔액</th>
+            {settings.relaxEnabled && <th>구분</th>}
           </tr>
         </thead>
         <tbody>
@@ -505,6 +536,9 @@ function BacktestDetail({ window: win, settings }) {
               <td>{t.rsi.toFixed(1)}</td>
               <td>{t.disp.toFixed(1)}%</td>
               <td>{fmtB(t.poolAfter)}</td>
+              {settings.relaxEnabled && (
+                <td style={{ color: t.relaxed ? '#f59e0b' : '#9ca3af' }}>{t.relaxed ? '완화' : '기본'}</td>
+              )}
             </tr>
           ))}
         </tbody>
