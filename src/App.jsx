@@ -434,6 +434,23 @@ function BacktestDetail({ window: win, settings }) {
       }))
   }, [daily, sellDates, relaxedSellDates, boostBoundaryDates])
 
+  // 부스터/완화매도 on-off 4가지 조합을 한번에 비교 (체크박스 일일이 바꿔가며
+  // 재조회하지 않아도 되도록). '세팅값'은 현재 파라미터 패널에 적용된 그대로.
+  const compareRows = useMemo(() => {
+    const variants = [
+      { label: '세팅값', enabled: settings.enabled, relaxEnabled: settings.relaxEnabled, isCurrent: true },
+      { label: '부스터 적용', enabled: true, relaxEnabled: false },
+      { label: '완화매도 적용', enabled: false, relaxEnabled: true },
+      { label: '완화매도+부스터 적용', enabled: true, relaxEnabled: true },
+    ]
+    return variants.map(v => {
+      const { stats: vStats } = runFinalBacktest(win.startDate, win.endDate, {
+        ...settings, enabled: v.enabled, relaxEnabled: v.relaxEnabled,
+      })
+      return { label: v.label, isCurrent: !!v.isCurrent, stats: vStats }
+    })
+  }, [win.startDate, win.endDate, settings])
+
   return (
     <section style={{ marginTop: 20 }}>
       <div className="stats-bar">
@@ -478,6 +495,32 @@ function BacktestDetail({ window: win, settings }) {
           </div>
         )}
       </div>
+
+      <div className="sub-heading">설정별 비교 (동일 기간, 나머지 파라미터 동일)</div>
+      <table className="sell-table compare-table">
+        <thead>
+          <tr>
+            <th style={{ textAlign: 'left' }}>구분</th>
+            <th>총자산</th>
+            <th>수익률</th>
+            <th>CAGR</th>
+            <th>MDD</th>
+            <th>매도횟수</th>
+          </tr>
+        </thead>
+        <tbody>
+          {compareRows.map(r => (
+            <tr key={r.label} className={r.isCurrent ? 'row-current' : undefined}>
+              <td style={{ textAlign: 'left' }}>{r.label}{r.isCurrent ? ' (현재)' : ''}</td>
+              <td>{fmtB(r.stats.finalTotal)}</td>
+              <td>{fmtPct(r.stats.returnPct)}</td>
+              <td>{fmtPct(r.stats.cagr)}</td>
+              <td>{r.stats.mdd.toFixed(1)}%</td>
+              <td>{r.stats.sellCount}회</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
 
       <ResponsiveContainer width="100%" height={380}>
         <ComposedChart data={chartData}>

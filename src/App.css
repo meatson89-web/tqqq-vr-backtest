@@ -216,6 +216,7 @@ header .sub {
    a hardcoded light color too — var(--text-h) turns near-black in light mode
    and disappears against the dark panel background. */
 .rules-panel .sell-table td { color: #cbd5e1; }
+.compare-table tr.row-current td { background: rgba(192, 132, 252, 0.12); color: #c084fc; }
 .sub-heading { font-size: 14px; font-weight: 600; color: #9ca3af; margin: 20px 0 4px; text-align: left; }
 
 /* panels always use the fixed dark palette below (#1e2030 bg) regardless of
