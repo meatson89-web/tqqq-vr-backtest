@@ -361,12 +361,12 @@ function WindowGrid({ windows, selected, onSelect }) {
   )
 }
 
-function SellDot({ cx, cy }) {
+function SellDot({ cx, cy, payload }) {
   if (!cx || !cy) return null
   return (
     <polygon
       points={`${cx},${cy + 2} ${cx - 5},${cy - 7} ${cx + 5},${cy - 7}`}
-      fill="#ef4444"
+      fill={payload?.sellRelaxed ? '#f59e0b' : '#ef4444'}
     />
   )
 }
@@ -400,6 +400,7 @@ function BacktestDetail({ window: win, settings }) {
   )
 
   const sellDates = useMemo(() => new Set(trades.map(t => t.date)), [trades])
+  const relaxedSellDates = useMemo(() => new Set(trades.filter(t => t.relaxed).map(t => t.date)), [trades])
 
   // 부스터 발동(조건 충족) 구간을 연속 구간으로 묶어서 차트 음영 표시용으로 변환
   const boostRanges = useMemo(() => {
@@ -429,8 +430,9 @@ function BacktestDetail({ window: win, settings }) {
         rsi: d.rsi,
         disp: d.disp,
         sell: sellDates.has(d.date) ? d.total : null,
+        sellRelaxed: relaxedSellDates.has(d.date),
       }))
-  }, [daily, sellDates, boostBoundaryDates])
+  }, [daily, sellDates, relaxedSellDates, boostBoundaryDates])
 
   return (
     <section style={{ marginTop: 20 }}>

@@ -177,7 +177,16 @@ header .sub {
 .rule-value { font-size: 14px; color: #e2e8f0; font-weight: 600; margin-top: 2px; }
 
 /* window grid */
-.window-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.window-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+@media (min-width: 900px) {
+  .window-grid { grid-template-columns: repeat(5, 1fr); }
+}
+@media (min-width: 1300px) {
+  .window-grid { grid-template-columns: repeat(6, 1fr); }
+}
+@media (min-width: 1600px) {
+  .window-grid { grid-template-columns: repeat(7, 1fr); }
+}
 .window-card { background: #1e2030; border-radius: 8px; padding: 12px; cursor: pointer; border: 2px solid transparent; transition: all 0.15s; }
 .window-card:hover { border-color: #4b5563; }
 .window-card.selected { border-color: #c084fc; box-shadow: 0 0 0 1px #c084fc; }
@@ -203,6 +212,10 @@ header .sub {
 .sell-table th:first-child { text-align: left; }
 .sell-table td { padding: 5px 10px; border-bottom: 1px solid #2d2f3f; color: var(--text-h); font-weight: 700; text-align: right; }
 .sell-table td:first-child { text-align: left; }
+/* sell-table nested inside a .rules-panel (always hardcoded-dark bg) must use
+   a hardcoded light color too — var(--text-h) turns near-black in light mode
+   and disappears against the dark panel background. */
+.rules-panel .sell-table td { color: #cbd5e1; }
 .sub-heading { font-size: 14px; font-weight: 600; color: #9ca3af; margin: 20px 0 4px; text-align: left; }
 
 /* panels always use the fixed dark palette below (#1e2030 bg) regardless of
@@ -244,7 +257,7 @@ header .sub {
 .sidebar-item.active { background: rgba(192, 132, 252, 0.18); color: #c084fc; border-color: rgba(192, 132, 252, 0.5); font-weight: 700; }
 .main-content { flex: 1; min-width: 0; }
 
-@media (max-width: 900px) {
+@media (max-width: 560px) {
   .layout { flex-direction: column; }
   .sidebar { width: 100%; flex-direction: row; flex-wrap: wrap; position: static; }
   .sidebar-title { display: none; }
