@@ -18,6 +18,11 @@ function fmtB(v) {
 function fmtMonthYear(d) {
   return d.slice(0, 7).replace('-', '.')
 }
+// 롤링 윈도우의 id는 숫자, 직접 기간 조회는 `custom-...` 문자열이라 타입이 섞인다.
+// 두 화면이 같은 판정을 각자 하다가 한쪽이 숫자에 startsWith를 호출해 앱이 죽었다.
+function isCustomWindow(win) {
+  return String(win.id).startsWith('custom-')
+}
 
 const FIXED_RULES = [
   { label: 'MA 기간', value: '180일' },
@@ -722,7 +727,7 @@ function App() {
           {view === 'custom' && (
             <>
               <CustomRangeForm onRun={setSel} />
-              {sel && sel.id.startsWith('custom-') && <BacktestDetail window={sel} settings={settings} />}
+              {sel && isCustomWindow(sel) && <BacktestDetail window={sel} settings={settings} />}
             </>
           )}
 
@@ -730,7 +735,7 @@ function App() {
             <>
               <section className="section-title">5년 롤링 윈도우 (분기별)</section>
               <WindowGrid windows={windows} selected={sel} onSelect={setSel} />
-              {sel && !sel.id.toString().startsWith('custom-') && <BacktestDetail window={sel} settings={settings} />}
+              {sel && !isCustomWindow(sel) && <BacktestDetail window={sel} settings={settings} />}
             </>
           )}
         </div>
