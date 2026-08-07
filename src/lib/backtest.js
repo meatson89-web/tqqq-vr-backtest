@@ -127,6 +127,11 @@ const TRADING_DAYS_PER_MONTH = 21;
 const SELL_RSI = 73;
 const SELL_DISP = 40;
 
+// 평상시 주간 POOL 재투자 비율. 부스터 조건을 만족한 주에만 settings.ratioPct로 올라간다.
+// 이 값 자체를 올리는 실험은 모두 나빴다 — 매도는 RSI가 높은 고점에서 일어나므로
+// 빨리 재투입하면 방금 판 가격에 도로 산다. 굼뜬 게 과열이 식기를 기다리는 역할을 한다.
+const BASE_POOL_RATIO = 0.05;
+
 // 해외주식 양도소득세: 지방소득세 포함 22%, 연 250만원 기본공제
 const TAX_RATE = 0.22;
 const TAX_DEDUCTION = 2_500_000;
@@ -253,7 +258,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
       // Weekly buy on Wednesdays: 적립금 + pool * 재투자비율(기본 5%, 부스터 조건 충족 시 상향)
       if (isWednesday(date)) {
         totalWeeks++;
-        let poolRatio = 0.05;
+        let poolRatio = BASE_POOL_RATIO;
         let wasBoosted = false;
         if (boostActive && !isNaN(rollMax) && priceUSD <= rollMax * (1 - boostDrawdownFrac)) {
           poolRatio = boostFrac;
@@ -355,6 +360,7 @@ export function getRollingWindows(settings = DEFAULT_SETTINGS, data = TQQQ_DATA)
 export function getBoosterStatus(settings = DEFAULT_SETTINGS) {
   const lookback = settings.lookback ?? DEFAULT_SETTINGS.lookback;
   const drawdownPct = settings.drawdownPct ?? DEFAULT_SETTINGS.drawdownPct;
+  const ratioPct = settings.ratioPct ?? DEFAULT_SETTINGS.ratioPct;
   const rollArr = getRollMaxArr(lookback);
   const n = TQQQ_DATA.length;
   const lastIdx = n - 1;
@@ -375,6 +381,7 @@ export function getBoosterStatus(settings = DEFAULT_SETTINGS) {
 
   return {
     date: TQQQ_DATA[lastIdx][0], price, lookback, drawdownPct,
+    ratioPct, basePoolPct: BASE_POOL_RATIO * 100,
     rollMax, rollMaxDate: TQQQ_DATA[hiIdx][0],
     ddNow, boosterOn, offPrice, offPct: (offPrice / price - 1) * 100,
     daysSincePeak, daysUntilRolloff, enabled: !!settings.enabled,

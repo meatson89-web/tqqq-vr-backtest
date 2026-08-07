@@ -286,20 +286,26 @@ function BoosterStatusPanel({ settings }) {
       <h3 className="panel-heading">부스터 상황판 <span style={{ fontWeight: 400, fontSize: 12, color: '#6b7280' }}>(기준일 {s.date}, 매일 자동 갱신)</span></h3>
       <div style={{ marginBottom: 14 }}>
         <span className={`status-badge ${s.boosterOn ? 'on' : 'off'}`}>
-          {s.boosterOn ? '🟠 부스터 ON (재투자 비율 상향 중)' : '⚪ 부스터 OFF (기본 5%)'}
+          {s.boosterOn
+            ? `🟠 부스터 ON (POOL 주간 재투자 ${s.basePoolPct}% → ${s.ratioPct}%)`
+            : `⚪ 부스터 OFF (POOL 주간 재투자 기본 ${s.basePoolPct}%)`}
         </span>
       </div>
       <div className="status-grid">
         <StatusItem label="최신 종가" value={`$${s.price.toFixed(2)}`} />
         <StatusItem label={`${s.lookback}거래일 고점`} value={`$${s.rollMax.toFixed(2)}`} />
         <StatusItem label="고점 발생일" value={s.rollMaxDate} />
-        <StatusItem label="현재 고점대비" value={`${s.ddNow.toFixed(1)}%`} tone={s.ddNow <= -s.drawdownPct ? 'warn' : undefined} />
-        <StatusItem label="OFF 전환 가격" value={`$${s.offPrice.toFixed(2)} (${s.offPct >= 0 ? '+' : ''}${s.offPct.toFixed(1)}%)`} />
+        <StatusItem label={`현재 고점대비 (발동 기준 -${s.drawdownPct}%)`} value={`${s.ddNow.toFixed(1)}%`} tone={s.ddNow <= -s.drawdownPct ? 'warn' : undefined} />
+        {/* 이 가격은 발동 임계선이다. 부스터가 꺼져 있으면 여기까지 "내려와야" 켜지고,
+            켜져 있으면 여기를 "넘어서야" 꺼진다. 상태에 따라 이름이 반대가 된다. */}
+        <StatusItem label={s.boosterOn ? 'OFF 전환 가격' : 'ON 전환 가격'} value={`$${s.offPrice.toFixed(2)} (${s.offPct >= 0 ? '+' : ''}${s.offPct.toFixed(1)}%)`} />
         <StatusItem label="고점 경과" value={`${s.daysSincePeak}거래일`} />
         <StatusItem label={`${s.lookback}일 창 이탈까지`} value={`${s.daysUntilRolloff}거래일`} />
       </div>
       <p style={{ color: '#9ca3af', fontSize: 12, textAlign: 'left', marginTop: 10 }}>
-        가격이 OFF 전환 가격 이상으로 오르거나, 고점이 {s.lookback}일 창에서 밀려나 기준 고점 자체가 낮아지면 부스터가 꺼집니다.
+        {s.boosterOn
+          ? `가격이 $${s.offPrice.toFixed(2)} 이상으로 오르거나, 고점이 ${s.lookback}일 창에서 밀려나 기준 고점 자체가 낮아지면 부스터가 꺼집니다.`
+          : `${s.lookback}거래일 고점 대비 -${s.drawdownPct}% 인 $${s.offPrice.toFixed(2)} 이하로 내려가면 부스터가 켜지고, 그 주 수요일부터 POOL 재투자 비율이 ${s.basePoolPct}%에서 ${s.ratioPct}%로 올라갑니다. 다만 ${s.daysUntilRolloff}거래일 뒤 현재 고점($${s.rollMax.toFixed(2)}, ${s.rollMaxDate})이 ${s.lookback}일 창에서 밀려나면 기준 고점이 낮아져 전환 가격도 함께 내려갑니다.`}
       </p>
     </div>
   )
