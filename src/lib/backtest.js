@@ -70,25 +70,45 @@ export const DATA_END = TQQQ_DATA[TQQQ_DATA.length - 1][0];
 //  - weeklyKRW: 수요일 정액 적립금 (기본 85만원)
 //  - poolCapKRW: 총자산이 이 금액 이하일 때 POOL 비중 10% 캡 적용 기준 (기본 2억)
 export const DEFAULT_SETTINGS = {
-  enabled: true, lookback: 60, drawdownPct: 25, ratioPct: 25,
+  // ratioPct 25 → 60: 부스터 강도. 25%는 발동해도 바닥에서 현금이 절반 남았다
+  // (2020-03-20 POOL 비중 55.3%). 60%면 18.5%까지 내려간다. 25→100% 전 구간이
+  // 단조 개선되는 고원이고, 60% 부근에서 코로나형 급반등 성과가 정점(+6.0%)이다.
+  // 100%는 전체구간 수치가 더 좋지만 한 주에 다 써버려 급반등 구간이 -0.8%로 꺾인다.
+  enabled: true, lookback: 60, drawdownPct: 30, ratioPct: 60,
   initialKRW: 100_000_000, weeklyKRW: 850_000, poolCapKRW: 200_000_000,
   // 완화매도: 마지막 수익실현 매도 후 relaxMonths개월 이상 지나면 RSI/이격도
   // 기준을 낮춰서 매도(수익률 25% 기준은 유지), 매도 비율도 relaxSellFrac로 축소.
   // 46개 롤링 구간 스윕 검증값(평균 총자산 +1.8%, 2018-08 미스 케이스 해결)이 기본값.
-  relaxEnabled: false, relaxMonths: 7, relaxRsiDrop: 0, relaxDispDrop: 12, relaxSellFrac: 0.05,
+  relaxEnabled: true, relaxMonths: 7, relaxRsiDrop: 0, relaxDispDrop: 12, relaxSellFrac: 0.05,
+  // 양도세: 일반 해외주식 계좌 기준. 연간 실현손익 합산 → 250만원 기본공제 → 22%(지방세 포함),
+  // 이듬해 5월 납부. 매도가 잦은 전략일수록 세후 성과가 크게 달라지므로 기본 ON.
+  taxEnabled: true,
 };
 export const DEFAULT_BOOSTER = DEFAULT_SETTINGS;
 
-// Pre-compute indicators once over full dataset so rolling windows are fast
-const _closes = TQQQ_DATA.map(([, c]) => c);
-const _rsi = calcRSI(_closes, 14);
-const _disp = calcDisparity(_closes, 180);
+// Pre-compute indicators once per dataset so rolling windows are fast.
+// 데이터셋별로 캐시 — 교차검증(scripts/validate.mjs)에서 QLD 등 다른 시계열을
+// 같은 엔진으로 돌려보기 위해 데이터셋을 인자로 받을 수 있게 해 둔다.
+const _indCache = new Map();
+function getIndicators(data) {
+  let ind = _indCache.get(data);
+  if (!ind) {
+    const closes = data.map(([, c]) => c);
+    ind = { closes, rsi: calcRSI(closes, 14), disp: calcDisparity(closes, 180), rollMax: {} };
+    _indCache.set(data, ind);
+  }
+  return ind;
+}
+
+const _closes = getIndicators(TQQQ_DATA).closes;
+const _rsi = getIndicators(TQQQ_DATA).rsi;
+const _disp = getIndicators(TQQQ_DATA).disp;
 
 // 부스터 lookback은 UI에서 바뀔 수 있으므로 값별로 캐시해서 재사용
-const _rollMaxCache = {};
-function getRollMaxArr(lookback) {
-  if (!_rollMaxCache[lookback]) _rollMaxCache[lookback] = calcRollMax(_closes, lookback);
-  return _rollMaxCache[lookback];
+function getRollMaxArr(lookback, data = TQQQ_DATA) {
+  const ind = getIndicators(data);
+  if (!ind.rollMax[lookback]) ind.rollMax[lookback] = calcRollMax(ind.closes, lookback);
+  return ind.rollMax[lookback];
 }
 
 function isWednesday(dateStr) {
@@ -97,10 +117,40 @@ function isWednesday(dateStr) {
 
 const TRADING_DAYS_PER_MONTH = 21;
 
-export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS) {
-  const startIdx = TQQQ_DATA.findIndex(([d]) => d >= startDate);
-  const endIdxRaw = TQQQ_DATA.findIndex(([d]) => d > endDate);
-  const sliceEnd = endIdxRaw === -1 ? TQQQ_DATA.length : endIdxRaw;
+// 수익실현 매도 임계. 70 → 73으로 올렸다.
+// 근거: RSI 71~75가 연속으로 전부 개선되는 "고원"이고(단일 봉우리가 아님),
+//   겹치지 않는 독립 5년 구간 3개에서 모두 세후 총자산이 늘었다(+5.9/+0.5/+6.8%).
+//   70에서만 걸리던 매도는 12건인데 그중 7건은 이후 낙폭이 -13% 이내여서
+//   세금만 내고 끝났을 거래였다. 놓치는 큰 하락(2020-02, 2018-08)을 포함하는
+//   윈도우로 따로 검증했을 때도 19개 중 19개에서 73이 우세했다 — POOL 재투입이
+//   주 5%로 느려서, 폭락을 피해 번 것보다 반등에 못 올라타 잃은 게 컸다.
+const SELL_RSI = 73;
+const SELL_DISP = 40;
+
+// 해외주식 양도소득세: 지방소득세 포함 22%, 연 250만원 기본공제
+const TAX_RATE = 0.22;
+const TAX_DEDUCTION = 2_500_000;
+
+// 적립식 현금흐름을 반영한 실제 수익률(IRR). 이분법으로 NPV=0인 할인율을 찾는다.
+// (총자산/총납입)^(1/연)-1 방식은 나중에 넣은 돈도 처음부터 복리한 것으로 계산해
+// 실제보다 12~15%p 낮게 나오므로 사용하지 않는다.
+function calcIRR(cashflows) {
+  let lo = -0.99, hi = 5;
+  for (let k = 0; k < 80; k++) {
+    const mid = (lo + hi) / 2;
+    let npv = 0;
+    for (const { t, amt } of cashflows) npv += amt / Math.pow(1 + mid, t);
+    if (npv > 0) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+// data 인자는 교차검증용. 생략하면 TQQQ.
+export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS, data = TQQQ_DATA) {
+  const { rsi: _rsiArr, disp: _dispArr } = getIndicators(data);
+  const startIdx = data.findIndex(([d]) => d >= startDate);
+  const endIdxRaw = data.findIndex(([d]) => d > endDate);
+  const sliceEnd = endIdxRaw === -1 ? data.length : endIdxRaw;
 
   if (startIdx === -1 || sliceEnd <= startIdx) {
     throw new Error('유효한 날짜 범위가 아닙니다');
@@ -114,7 +164,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   const poolCapKRW = booster.poolCapKRW ?? DEFAULT_SETTINGS.poolCapKRW;
   const initialKRW = booster.initialKRW ?? DEFAULT_SETTINGS.initialKRW;
   const lookback = booster.lookback ?? DEFAULT_SETTINGS.lookback;
-  const rollMaxArr = boostActive ? getRollMaxArr(lookback) : null;
+  const rollMaxArr = boostActive ? getRollMaxArr(lookback, data) : null;
 
   const relaxEnabled = !!booster.relaxEnabled;
   const relaxMonths = booster.relaxMonths ?? DEFAULT_SETTINGS.relaxMonths;
@@ -123,17 +173,23 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   const relaxSellFrac = booster.relaxSellFrac ?? DEFAULT_SETTINGS.relaxSellFrac;
   const relaxDays = relaxMonths * TRADING_DAYS_PER_MONTH;
 
+  const taxEnabled = booster.taxEnabled ?? DEFAULT_SETTINGS.taxEnabled;
+
   let shares = 0, avgCost = 0, pool = 0, totalIn = 0;
   let cooldown = 0, sellNo = 0, started = false;
   let boostedWeeks = 0, totalWeeks = 0;
   let lastSellIdx = startIdx;
+  // 양도세 누적: 당해 실현손익 → 연말에 세액 확정 → 이듬해 5월 납부
+  let realizedGain = 0, taxPaid = 0, taxDue = 0, taxDueYear = -1;
+  let capApplied = 0;           // POOL 비중캡이 실제로 발동한 횟수
+  const cashflows = [];         // IRR 계산용 (납입 -, 최종평가 +)
   const daily = [], trades = [], boostTrades = [];
 
   for (let i = startIdx; i < sliceEnd; i++) {
-    const [date, priceUSD] = TQQQ_DATA[i];
+    const [date, priceUSD] = data[i];
     const price = priceUSD * 1350;
-    const rsi = _rsi[i];
-    const disp = _disp[i];
+    const rsi = _rsiArr[i];
+    const disp = _dispArr[i];
     const rollMax = rollMaxArr ? rollMaxArr[i] : NaN;
 
     if (!started) {
@@ -143,10 +199,32 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
       totalIn = initialKRW;
       started = true;
       lastSellIdx = i;
+      cashflows.push({ t: 0, amt: -initialKRW });
     } else {
+      // 이듬해 5월: 확정된 세액 납부. POOL이 모자라면 주식을 팔아 충당한다.
+      if (taxEnabled && taxDueYear >= 0 && +date.slice(0, 4) === taxDueYear && +date.slice(5, 7) >= 5) {
+        const fromPool = Math.min(taxDue, pool);
+        pool -= fromPool;
+        if (taxDue > fromPool) {
+          const sellShares = Math.min(shares, (taxDue - fromPool) / price);
+          realizedGain += sellShares * (price - avgCost);
+          shares -= sellShares;
+        }
+        taxPaid += taxDue;
+        taxDue = 0;
+        taxDueYear = -1;
+      }
+      // 연말(또는 백테스트 종료일)에 당해 실현손익으로 세액 확정
+      const isYearEnd = i + 1 >= sliceEnd || data[i + 1][0].slice(0, 4) !== date.slice(0, 4);
+      if (taxEnabled && isYearEnd) {
+        taxDue += Math.max(0, realizedGain - TAX_DEDUCTION) * TAX_RATE;
+        taxDueYear = +date.slice(0, 4) + 1;
+        realizedGain = 0;
+      }
+
       const ret = avgCost > 0 ? (price - avgCost) / avgCost : 0;
       const relaxActive = relaxEnabled && (i - lastSellIdx >= relaxDays);
-      const effRsi = relaxActive ? 70 - relaxRsiDrop : 70;
+      const effRsi = relaxActive ? SELL_RSI - relaxRsiDrop : SELL_RSI;
       const effDisp = relaxActive ? 40 - relaxDispDrop : 40;
       // Cooldown: decrement or check sell (matches Python if/else structure)
       if (cooldown > 0) {
@@ -156,13 +234,14 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
         !isNaN(disp) && disp > effDisp &&
         ret >= 0.25
       ) {
-        // A sell that would have fired at the normal 70/40 bar anyway keeps
+        // A sell that would have fired at the normal RSI/이격도 bar anyway keeps
         // the normal 70% sell size; only a sell that needed the relaxed bar
         // uses the smaller relaxSellFrac.
-        const normalFire = rsi >= 70 && disp > 40;
+        const normalFire = rsi >= SELL_RSI && disp > SELL_DISP;
         const sellFrac = normalFire ? 0.70 : relaxSellFrac;
         const sellShares = shares * sellFrac;
         const sellValue = sellShares * price;
+        realizedGain += sellShares * (price - avgCost);
         shares -= sellShares;
         pool += sellValue;
         cooldown = 10;
@@ -194,6 +273,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
         shares += newShares;
         pool -= boost;
         totalIn += weeklyKRW;
+        cashflows.push({ t: (i - startIdx) / 252, amt: -weeklyKRW });
 
         // Pool cap: total <= poolCapKRW and pool > total*10% → reinvest excess
         const total = shares * price + pool;
@@ -203,6 +283,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
           avgCost = (avgCost * shares + excess) / (shares + extraShares);
           shares += extraShares;
           pool -= excess;
+          capApplied++;
         }
       }
     }
@@ -219,13 +300,23 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   const days = daily.length;
   const years = days / 252;
   const returnPct = (last.total - totalIn) / totalIn * 100;
-  const cagr = (Math.pow(last.total / totalIn, 1 / years) - 1) * 100;
+  // 주의: taxEnabled면 last.total은 이미 "세금을 내면서 굴린 경로"의 평가액이므로 세전 금액이 아니다.
+  // 세금이 없었을 때의 값을 보려면 taxEnabled:false로 다시 돌려야 한다.
+  // finalAfterTax는 여기서 아직 안 낸 당해 확정분(taxDue)까지 뺀 최종 실수령 기준 자산.
+  const finalAfterTax = last.total - taxDue;
+  cashflows.push({ t: years, amt: finalAfterTax });
+  const irr = calcIRR(cashflows) * 100;
 
   const stats = {
     returnPct,
-    cagr,
+    returnAfterTaxPct: (finalAfterTax - totalIn) / totalIn * 100,
+    irr,
     mdd: calcMDD(daily.map(d => d.total)),
     finalTotal: last.total,
+    finalAfterTax,
+    taxPaid: taxPaid + taxDue,
+    taxEnabled,
+    capApplied,
     finalStock: last.stockValue,
     finalPool: last.pool,
     totalIn,
@@ -242,16 +333,16 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
 }
 
 // All 5-year windows (252*5 trading days), sliding by 63 days (one quarter)
-export function getRollingWindows(settings = DEFAULT_SETTINGS) {
+export function getRollingWindows(settings = DEFAULT_SETTINGS, data = TQQQ_DATA) {
   const WINDOW = 252 * 5;
   const SLIDE = 63;
   const result = [];
   let id = 0;
-  for (let start = 0; start + WINDOW <= TQQQ_DATA.length; start += SLIDE) {
-    const startDate = TQQQ_DATA[start][0];
-    const endDate = TQQQ_DATA[start + WINDOW - 1][0];
+  for (let start = 0; start + WINDOW <= data.length; start += SLIDE) {
+    const startDate = data[start][0];
+    const endDate = data[start + WINDOW - 1][0];
     try {
-      const { stats } = runFinalBacktest(startDate, endDate, settings);
+      const { stats } = runFinalBacktest(startDate, endDate, settings, data);
       result.push({ id: id++, startDate, endDate, stats });
     } catch (_) {
       // skip windows with insufficient data
@@ -298,7 +389,7 @@ export function getSellConditionStatus() {
   const rsiNow = _rsi[lastIdx];
   const dispNow = _disp[lastIdx];
   const ma180 = priceUSD / (1 + dispNow / 100);
-  const targetPrice = ma180 * 1.40;
+  const targetPrice = ma180 * (1 + SELL_DISP / 100);
   const neededPct = (targetPrice / priceUSD - 1) * 100;
 
   const scenarios = [3, 5, 7, 10, 15, 20, 30].map(days => {
@@ -307,13 +398,14 @@ export function getSellConditionStatus() {
     for (let k = 1; k <= days; k++) sim.push(sim[sim.length - 1] * dailyMult);
     const simRsi = calcRSI(sim, 14);
     const projectedRsi = simRsi[sim.length - 1];
-    return { days, dailyPct: (dailyMult - 1) * 100, projectedRsi, meets: projectedRsi >= 70 };
+    return { days, dailyPct: (dailyMult - 1) * 100, projectedRsi, meets: projectedRsi >= SELL_RSI };
   });
 
   return {
     date: TQQQ_DATA[lastIdx][0], priceUSD, rsiNow, dispNow, ma180,
     targetPrice, neededPct,
-    rsiMet: rsiNow >= 70, dispMet: dispNow > 40,
+    rsiMet: rsiNow >= SELL_RSI, dispMet: dispNow > SELL_DISP,
+    sellRsi: SELL_RSI, sellDisp: SELL_DISP,
     scenarios,
   };
 }

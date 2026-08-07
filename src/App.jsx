@@ -22,7 +22,7 @@ function fmtMonthYear(d) {
 const FIXED_RULES = [
   { label: 'MA 기간', value: '180일' },
   { label: '이격도 기준', value: '> 40%' },
-  { label: 'RSI(14)', value: '≥ 70' },
+  { label: 'RSI(14)', value: '≥ 73' },
   { label: '수익률 기준', value: '≥ 25%' },
   { label: '매도 비율', value: '주식 70%' },
   { label: '매도 쿨다운', value: '10거래일' },
@@ -52,20 +52,43 @@ function StrategyInfo() {
           <b>매수</b> — 시작일에 초기 투입금을 일시 매수하고, 이후 매주 수요일마다 정액을 적립매수합니다.
         </p>
         <p>
-          <b>매도</b> — <i>주가가 180일 이동평균보다 40%를 초과해서 높고</i>, <i>RSI(14)가 70 이상</i>이고,
+          <b>매도</b> — <i>주가가 180일 이동평균보다 40%를 초과해서 높고</i>, <i>RSI(14)가 73 이상</i>이고,
           <i> 평단가 대비 수익률이 25% 이상</i>인 세 조건을 동시에 만족하면 보유 주식의 70%를 매도합니다.
           매도 직후 10거래일 동안은 재매도하지 않습니다(쿨다운).
+          <b> RSI 기준은 70에서 73으로 올렸습니다</b> — 71~75가 연속으로 개선되는 구간이고,
+          겹치지 않는 독립 5년 구간 3개에서 모두 세후 총자산이 늘었습니다(+5.9 / +0.5 / +6.8%).
+          70에서만 걸리던 매도 12건 중 7건은 이후 낙폭이 -13% 이내라 세금만 내고 끝났을 거래였습니다.
         </p>
         <p>
           <b>POOL 재투자</b> — 매도로 확보한 현금은 POOL에 쌓이고, 매주 수요일 POOL 잔고의 5%가
           정액 적립금과 함께 재투자됩니다. 단 총자산이 설정한 비중캡 기준 이하일 때 POOL 비중이
           10%를 넘으면, 초과분을 즉시 매수해 현금이 과도하게 쌓이지 않게 합니다.
+          <b> 주의</b> — 이 캡은 총자산이 기준 금액을 <i>넘어서는 순간부터 영구히 꺼집니다.</i>
+          초기 투입금 1억으로 2010년부터 돌리면 한 번도 발동하지 않습니다(상단 "POOL 비중캡"
+          항목에서 실제 발동 횟수를 확인하세요). 자산이 커진 뒤에는 없는 기능이나 마찬가지이므로,
+          이 값을 조정해 결과가 바뀐다면 그 구간에서만 유효한 것입니다.
         </p>
         <p>
-          <b>POOL 부스터(옵션)</b> — 최근 N거래일(기본 60일) 고점 대비 설정한 낙폭(기본 -25%) 이상
-          하락한 주에는, 평소 5%였던 POOL 재투자 비율을 설정한 값(기본 25%)까지 올려서 급락 구간에
-          더 공격적으로 재투자합니다. 짧고 굵게 끝나는 급락에는 유리하지만, 2022년처럼 길게 끄는
-          약세장에서는 평단가를 오히려 높일 수 있다는 점이 백테스트로 확인됐습니다.
+          <b>양도소득세</b> — 일반 해외주식 계좌 기준으로 연간 실현손익을 합산해 250만원을 공제한
+          뒤 22%를 이듬해 5월에 납부하는 것으로 계산합니다. 이 전략은 이익 실현 매도를 반복하므로
+          세금 영향이 큽니다. 2010~2026 전체 구간에서 세전 총자산은 매도를 전혀 하지 않는 단순
+          적립식(757억)보다 크지만, <b>세후로는 역전됩니다.</b> 세금을 빼고 본 수치는 실제로
+          손에 남는 금액이 아닙니다.
+        </p>
+        <p>
+          <b>POOL 부스터</b> — 최근 N거래일(기본 60일) 고점 대비 설정한 낙폭(기본 -30%) 이상
+          하락한 주에는, 평소 5%였던 POOL 재투자 비율을 설정한 값(기본 60%)까지 올려서 급락 구간에
+          더 공격적으로 재투자합니다.
+          <b> 강도를 25%에서 60%로 올렸습니다</b> — 25%로는 발동해도 바닥에서 현금이 절반 남았습니다
+          (2020-03-20 저점의 POOL 비중 55.3%). 60%면 18.5%까지 내려갑니다. 25~100% 전 구간이
+          단조롭게 개선되는 형태였고, 60% 부근에서 급반등 구간 성과가 정점이었습니다. 100%는 한 주에
+          전액을 써버려 바닥 전에 실탄이 떨어집니다.
+        </p>
+        <p>
+          <b>주의 — 재투자 "속도"를 무조건 올리면 안 됩니다.</b> 평상시 재투자율(5%)을 10~15%로
+          올리는 실험은 모두 크게 나빠졌습니다. 매도는 RSI가 높은 <i>고점</i>에서 일어나므로, 빨리
+          재투입하면 방금 판 가격에 도로 사게 됩니다. 5%의 굼뜸은 과열이 식기를 기다리는 장치입니다.
+          부스터가 효과적인 이유는 빠르기 때문이 아니라 <i>이미 크게 빠진 뒤에만</i> 빠르기 때문입니다.
         </p>
         <p>
           <b>완화매도(옵션)</b> — 마지막 수익실현 매도로부터 설정한 개월 수(기본 7개월) 이상
@@ -73,6 +96,22 @@ function StrategyInfo() {
           시도합니다. 이때는 보유 주식을 70%가 아니라 설정한 작은 비율(기본 5%)만 팔아
           POOL을 조금씩 확보합니다. 46개 롤링 5년 구간 검증 결과 27개 구간에서 개선(평균
           +3.0%), 19개 구간에서 소폭 악화(평균 -1.0%)되어 전체 평균 총자산은 +1.8%였습니다.
+          <b> 다만</b> 46개 구간은 인접 구간끼리 데이터가 95% 겹쳐서 독립 표본은 사실상 3개에
+          불과합니다. 또한 완화 파라미터를 이웃 값으로 바꿔도 전체 결과가 1.1배 안에서만 움직여
+          이 +1.8%는 측정 오차와 구분되지 않습니다. 확정된 개선으로 보지 마세요.
+        </p>
+        <p>
+          <b>이 전략이 막지 못하는 것</b> — 화면의 백테스트는 TQQQ 상장(2010-02) 이후만 씁니다.
+          QQQ로 1999년까지 역산한 합성 데이터(<code>scripts/build-sim-tqqq.py</code>, 차입비용 반영,
+          실제 TQQQ와 일간 상관 0.9989·MDD -81.5% vs -81.7%로 검증)로 돌려보면 결과가 다릅니다.
+          <b> 1999-03~2004-03 구간은 3.18억을 넣고 1.41억(원금의 44%), 2004-03~2009-03 구간은
+          3.21억을 넣고 0.66억(원금의 21%)으로 끝납니다.</b> MDD는 -92~-99%입니다.
+          매도 조건이 <i>이격도 40% 초과</i>를 요구하는데 하락장에서는 주가가 180일선 위로 그만큼
+          올라갈 일이 없어, 5년간 매도가 3~4회에 그칩니다. 매도 규칙이 구조적으로 발동하지 못합니다.
+          순수 적립식, MA200 추세필터를 포함해 어떤 규칙도 이 구간을 구하지 못했습니다(추세필터는
+          닷컴 구간에서 오히려 1.41억→1.29억으로 나빴습니다). 기초자산이 -99.95% 빠지면 그 자산
+          안에서의 매매 규칙으로는 해결되지 않습니다. 이 리스크에 대한 대응은 파라미터가 아니라
+          비중 상한·자산배분 차원이어야 합니다.
         </p>
         <p>
           <b>파라미터</b> — 초기 투입금, 수요일 적립금, POOL 비중캡 기준, 부스터 조건은 상단
@@ -144,6 +183,17 @@ function ParametersPanel({ draft, onDraftChange, onApply, dirty }) {
         {numField('이격도 완화폭', draft.relaxDispDrop, v => set('relaxDispDrop', v), { min: 0, max: 40, step: 1, unit: 'p', disabled: !draft.relaxEnabled })}
         {numField('완화매도 비율', draft.relaxSellFrac * 100, v => set('relaxSellFrac', v / 100), { min: 1, max: 70, step: 1, unit: '%', disabled: !draft.relaxEnabled })}
       </div>
+
+      <div className="param-divider" />
+
+      <label className="param-checkbox">
+        <input
+          type="checkbox"
+          checked={draft.taxEnabled}
+          onChange={e => set('taxEnabled', e.target.checked)}
+        />
+        양도소득세 반영 (일반 해외주식 계좌 · 22% · 연 250만원 공제)
+      </label>
 
       <button type="button" className="run-btn apply-btn" onClick={onApply} disabled={!dirty}>
         {dirty ? '적용' : '적용됨'}
@@ -336,7 +386,7 @@ function WindowGrid({ windows, selected, onSelect }) {
   return (
     <div className="window-grid">
       {windows.map(w => {
-        const { returnPct } = w.stats
+        const returnPct = w.stats.returnAfterTaxPct
         const colorClass = returnPct > 150 ? 'green' : returnPct > 80 ? 'yellow' : 'red'
         const isSelected = selected && selected.id === w.id
         return (
@@ -349,7 +399,7 @@ function WindowGrid({ windows, selected, onSelect }) {
               {fmtMonthYear(w.startDate)}~{fmtMonthYear(w.endDate)}
             </div>
             <div style={{ fontSize: 13, color: '#e2e8f0' }}>
-              수익률 {fmtPct(w.stats.returnPct)}&nbsp;&nbsp;CAGR {w.stats.cagr.toFixed(0)}%
+              수익률 {fmtPct(returnPct)}&nbsp;&nbsp;IRR {w.stats.irr.toFixed(0)}%
             </div>
             <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 3 }}>
               MDD {w.stats.mdd.toFixed(1)}%&nbsp;&nbsp;매도 {w.stats.sellCount}회
@@ -459,16 +509,16 @@ function BacktestDetail({ window: win, settings }) {
           <span className="value" style={{ fontSize: 13 }}>{stats.startDate} ~ {stats.endDate}</span>
         </div>
         <div className="stat-item">
-          <span className="label">총자산</span>
-          <span className="value">{fmtB(stats.finalTotal)}</span>
+          <span className="label">{stats.taxEnabled ? '총자산 (세후)' : '총자산'}</span>
+          <span className="value">{fmtB(stats.finalAfterTax)}</span>
         </div>
         <div className="stat-item">
-          <span className="label">수익률</span>
-          <span className="value">{fmtPct(stats.returnPct)}</span>
+          <span className="label">{stats.taxEnabled ? '수익률 (세후)' : '수익률'}</span>
+          <span className="value">{fmtPct(stats.returnAfterTaxPct)}</span>
         </div>
         <div className="stat-item">
-          <span className="label">CAGR</span>
-          <span className="value">{fmtPct(stats.cagr)}</span>
+          <span className="label">IRR</span>
+          <span className="value">{fmtPct(stats.irr)}</span>
         </div>
         <div className="stat-item">
           <span className="label">MDD</span>
@@ -481,6 +531,18 @@ function BacktestDetail({ window: win, settings }) {
         <div className="stat-item">
           <span className="label">투입자본</span>
           <span className="value">{fmtB(stats.totalIn)}</span>
+        </div>
+        {stats.taxEnabled && (
+          <div className="stat-item">
+            <span className="label">납부세액</span>
+            <span className="value">{fmtB(stats.taxPaid)}</span>
+          </div>
+        )}
+        <div className="stat-item">
+          <span className="label">POOL 비중캡</span>
+          <span className="value" style={stats.capApplied === 0 ? { color: '#f59e0b' } : undefined}>
+            {stats.capApplied === 0 ? '미발동' : `${stats.capApplied}회`}
+          </span>
         </div>
         {settings.enabled && (
           <div className="stat-item">
@@ -502,8 +564,8 @@ function BacktestDetail({ window: win, settings }) {
           <tr>
             <th style={{ textAlign: 'left' }}>구분</th>
             <th>총자산</th>
-            <th>수익률</th>
-            <th>CAGR</th>
+            <th>납부세액</th>
+            <th>IRR</th>
             <th>MDD</th>
             <th>매도횟수</th>
           </tr>
@@ -512,9 +574,9 @@ function BacktestDetail({ window: win, settings }) {
           {compareRows.map(r => (
             <tr key={r.label} className={r.isCurrent ? 'row-current' : undefined}>
               <td style={{ textAlign: 'left' }}>{r.label}{r.isCurrent ? ' (현재)' : ''}</td>
-              <td>{fmtB(r.stats.finalTotal)}</td>
-              <td>{fmtPct(r.stats.returnPct)}</td>
-              <td>{fmtPct(r.stats.cagr)}</td>
+              <td>{fmtB(r.stats.finalAfterTax)}</td>
+              <td>{fmtB(r.stats.taxPaid)}</td>
+              <td>{fmtPct(r.stats.irr)}</td>
               <td>{r.stats.mdd.toFixed(1)}%</td>
               <td>{r.stats.sellCount}회</td>
             </tr>
