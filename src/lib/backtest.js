@@ -381,6 +381,23 @@ export function getRollingWindows(settings = DEFAULT_SETTINGS, data = TQQQ_DATA)
   return result;
 }
 
+// 그날 RSI에 적용될 과열 스로틀 재투자 비율(%). 스로틀이 걸리지 않으면 null.
+// 백테스트 내부 로직과 화면(상황판·차트 음영)이 같은 판정을 쓰도록 여기서 한 번만 정의한다.
+export function throttlePctForRsi(rsi, settings = DEFAULT_SETTINGS) {
+  if (!settings.throttleEnabled || isNaN(rsi)) return null;
+  const tiers = [...(settings.throttleTiers ?? DEFAULT_SETTINGS.throttleTiers)].sort((a, b) => a[0] - b[0]);
+  let pct = null;
+  for (const [thr, p] of tiers) if (rsi >= thr) pct = p;
+  return pct !== null && pct < BASE_POOL_RATIO * 100 ? pct : null;
+}
+
+// 스로틀이 걸리기 시작하는 첫 단 [RSI임계, 재투자%] (화면 문구·차트 범례용)
+export function throttleFirstTier(settings = DEFAULT_SETTINGS) {
+  if (!settings.throttleEnabled) return null;
+  const tiers = [...(settings.throttleTiers ?? DEFAULT_SETTINGS.throttleTiers)].sort((a, b) => a[0] - b[0]);
+  return tiers[0] ?? null;
+}
+
 // ── 부스터 상황판: 최신 데이터 기준 현재 부스터 on/off 상태 ──────────────────
 export function getBoosterStatus(settings = DEFAULT_SETTINGS) {
   const lookback = settings.lookback ?? DEFAULT_SETTINGS.lookback;
@@ -404,12 +421,24 @@ export function getBoosterStatus(settings = DEFAULT_SETTINGS) {
   const daysSincePeak = lastIdx - hiIdx;
   const daysUntilRolloff = Math.max(0, lookback - daysSincePeak - 1);
 
+  // 과열 스로틀. 부스터가 켜져 있으면 스로틀은 적용되지 않으므로(백테스트 로직과 동일)
+  // 실제 이번 주 수요일에 적용될 재투자 비율은 부스터 > 스로틀 > 기본 5% 순으로 결정된다.
+  const rsiNow = _rsi[lastIdx];
+  const firstTier = throttleFirstTier(settings);
+  const throttlePct = throttlePctForRsi(rsiNow, settings);
+  const throttleOn = !boosterOn && throttlePct !== null;
+  const effectivePoolPct = boosterOn ? ratioPct : (throttleOn ? throttlePct : BASE_POOL_RATIO * 100);
+
   return {
     date: TQQQ_DATA[lastIdx][0], price, lookback, drawdownPct,
     ratioPct, basePoolPct: BASE_POOL_RATIO * 100,
     rollMax, rollMaxDate: TQQQ_DATA[hiIdx][0],
     ddNow, boosterOn, offPrice, offPct: (offPrice / price - 1) * 100,
     daysSincePeak, daysUntilRolloff, enabled: !!settings.enabled,
+    rsiNow, throttleOn, throttlePct, effectivePoolPct,
+    throttleEnabled: !!settings.throttleEnabled,
+    throttleRsi: firstTier ? firstTier[0] : null,
+    throttleFirstPct: firstTier ? firstTier[1] : null,
   };
 }
 

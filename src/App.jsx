@@ -6,8 +6,14 @@ import {
 import {
   getRollingWindows, runFinalBacktest, DEFAULT_SETTINGS, DATA_START, DATA_END,
   getBoosterStatus, getSellConditionStatus, checkGainCondition,
+  throttlePctForRsi, throttleFirstTier,
 } from './lib/backtest'
 import './App.css'
+
+// 주식 영역 색. 과열 스로틀 구간만 주황으로 갈아끼운다.
+// 부스터 세로 음영(#f59e0b, 투명도 0.14)과 구분되도록 더 진한 주황을 쓴다.
+const STOCK_COLOR = '#10b981'
+const HOT_COLOR = '#f97316'
 
 function fmtPct(v) {
   return `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
@@ -307,14 +313,30 @@ function StatusItem({ label, value, tone }) {
   )
 }
 
+// 이번 주 수요일에 실제로 적용될 POOL 재투자 비율을 한 줄로 알려주는 배지.
+// 우선순위는 백테스트 로직과 같다: 부스터 > 과열 스로틀 > 기본 5%.
+function PoolRatioBadge({ s }) {
+  if (s.boosterOn) {
+    return <span className="status-badge on">🟠 부스터 ON (POOL 주간 재투자 {s.basePoolPct}% → {s.ratioPct}%)</span>
+  }
+  if (s.throttleOn) {
+    return <span className="status-badge on" style={{ background: '#7c2d12', borderColor: '#f97316', color: '#fdba74' }}>
+      🔴 과열 스로틀 ON — RSI {s.rsiNow.toFixed(1)} ≥ {s.throttleRsi} (POOL 주간 재투자 {s.basePoolPct}% → {s.throttlePct}%)
+    </span>
+  }
+  return <span className="status-badge off">⚪ 평상시 (POOL 주간 재투자 {s.basePoolPct}%)</span>
+}
+
 function BoosterStatusPanel({ settings }) {
   const s = useMemo(() => getBoosterStatus(settings), [settings])
   if (!s.enabled) {
     return (
       <div className="rules-panel">
-        <h3 className="panel-heading">부스터 상황판</h3>
+        <h3 className="panel-heading">부스터 상황판 <span style={{ fontWeight: 400, fontSize: 12, color: '#6b7280' }}>(기준일 {s.date})</span></h3>
+        <div style={{ marginBottom: 10 }}><PoolRatioBadge s={s} /></div>
         <p style={{ color: '#9ca3af', fontSize: 13, textAlign: 'left' }}>
-          현재 파라미터 패널에서 POOL 부스터가 꺼져 있습니다. 켜고 "적용"을 누르면 현재 상황이 표시됩니다.
+          현재 파라미터 패널에서 POOL 부스터가 꺼져 있습니다. 켜고 "적용"을 누르면 부스터 상황이 표시됩니다.
+          {s.throttleEnabled && ` 과열 스로틀은 부스터와 별개로 계속 동작합니다 (현재 RSI ${s.rsiNow.toFixed(1)}).`}
         </p>
       </div>
     )
@@ -322,13 +344,7 @@ function BoosterStatusPanel({ settings }) {
   return (
     <div className="rules-panel">
       <h3 className="panel-heading">부스터 상황판 <span style={{ fontWeight: 400, fontSize: 12, color: '#6b7280' }}>(기준일 {s.date}, 매일 자동 갱신)</span></h3>
-      <div style={{ marginBottom: 14 }}>
-        <span className={`status-badge ${s.boosterOn ? 'on' : 'off'}`}>
-          {s.boosterOn
-            ? `🟠 부스터 ON (POOL 주간 재투자 ${s.basePoolPct}% → ${s.ratioPct}%)`
-            : `⚪ 부스터 OFF (POOL 주간 재투자 기본 ${s.basePoolPct}%)`}
-        </span>
-      </div>
+      <div style={{ marginBottom: 14 }}><PoolRatioBadge s={s} /></div>
       <div className="status-grid">
         <StatusItem label="최신 종가" value={`$${s.price.toFixed(2)}`} />
         <StatusItem label={`${s.lookback}거래일 고점`} value={`$${s.rollMax.toFixed(2)}`} />
@@ -339,12 +355,29 @@ function BoosterStatusPanel({ settings }) {
         <StatusItem label={s.boosterOn ? 'OFF 전환 가격' : 'ON 전환 가격'} value={`$${s.offPrice.toFixed(2)} (${s.offPct >= 0 ? '+' : ''}${s.offPct.toFixed(1)}%)`} />
         <StatusItem label="고점 경과" value={`${s.daysSincePeak}거래일`} />
         <StatusItem label={`${s.lookback}일 창 이탈까지`} value={`${s.daysUntilRolloff}거래일`} />
+        {s.throttleEnabled && (
+          <StatusItem
+            label={`과열 스로틀 (RSI ≥ ${s.throttleRsi})`}
+            value={s.boosterOn
+              ? `RSI ${s.rsiNow.toFixed(1)} · 부스터 우선`
+              : `RSI ${s.rsiNow.toFixed(1)} · ${s.throttleOn ? `발동 (${s.throttlePct}%)` : '미발동'}`}
+            tone={s.throttleOn && !s.boosterOn ? 'warn' : undefined}
+          />
+        )}
+        <StatusItem label="이번 주 실제 재투자 비율" value={`${s.effectivePoolPct}%`} tone={s.effectivePoolPct < s.basePoolPct ? 'warn' : undefined} />
       </div>
       <p style={{ color: '#9ca3af', fontSize: 12, textAlign: 'left', marginTop: 10 }}>
         {s.boosterOn
           ? `가격이 $${s.offPrice.toFixed(2)} 이상으로 오르거나, 고점이 ${s.lookback}일 창에서 밀려나 기준 고점 자체가 낮아지면 부스터가 꺼집니다.`
           : `${s.lookback}거래일 고점 대비 -${s.drawdownPct}% 인 $${s.offPrice.toFixed(2)} 이하로 내려가면 부스터가 켜지고, 그 주 수요일부터 POOL 재투자 비율이 ${s.basePoolPct}%에서 ${s.ratioPct}%로 올라갑니다. 다만 ${s.daysUntilRolloff}거래일 뒤 현재 고점($${s.rollMax.toFixed(2)}, ${s.rollMaxDate})이 ${s.lookback}일 창에서 밀려나면 기준 고점이 낮아져 전환 가격도 함께 내려갑니다.`}
       </p>
+      {s.throttleEnabled && (
+        <p style={{ color: '#9ca3af', fontSize: 12, textAlign: 'left', marginTop: 6 }}>
+          {s.throttleOn
+            ? `RSI(14)가 ${s.rsiNow.toFixed(1)}로 ${s.throttleRsi} 이상이라 이번 주 수요일 POOL 재투자는 ${s.throttlePct}%입니다. 정액 적립금은 그대로 들어갑니다. RSI가 ${s.throttleRsi} 아래로 내려오면 기본 ${s.basePoolPct}%로 돌아갑니다.`
+            : `RSI(14)가 ${s.rsiNow.toFixed(1)}로 ${s.throttleRsi} 미만이라 과열 스로틀은 꺼져 있습니다. ${s.throttleRsi} 이상으로 올라가면 그 주 POOL 재투자가 ${s.throttleFirstPct}%로 줄어듭니다(정액 적립금은 유지). 부스터가 켜진 주에는 스로틀보다 부스터가 우선합니다.`}
+        </p>
+      )}
     </div>
   )
 }
@@ -479,8 +512,9 @@ function CustomTooltip({ active, payload, label }) {
       <p style={{ color: '#f3f4f6', margin: '2px 0' }}>TQQQ 가격: ${d.priceUSD != null ? d.priceUSD.toFixed(2) : '-'}</p>
       <p style={{ color: '#f3f4f6', margin: '2px 0' }}>RSI(14): {d.rsi != null && !isNaN(d.rsi) ? d.rsi.toFixed(1) : '-'}</p>
       <p style={{ color: '#f3f4f6', margin: '2px 0' }}>180일 이격도: {d.disp != null && !isNaN(d.disp) ? `${d.disp.toFixed(1)}%` : '-'}</p>
+      {d.hot && <p style={{ color: HOT_COLOR, margin: '2px 0' }}>과열 스로틀 발동 — POOL 재투자 중단</p>}
       <p style={{ color: '#e2e8f0', margin: '6px 0 2px' }}>총자산: {(total / 1e8).toFixed(2)}억</p>
-      <p style={{ color: '#10b981', margin: '2px 0' }}>주식: {((d.stock || 0) / 1e8).toFixed(2)}억</p>
+      <p style={{ color: d.hot ? HOT_COLOR : STOCK_COLOR, margin: '2px 0' }}>주식: {((d.stock || 0) / 1e8).toFixed(2)}억</p>
       <p style={{ color: '#3b82f6', margin: '2px 0' }}>POOL: {((d.pool || 0) / 1e8).toFixed(2)}억</p>
       <p style={{ color: '#9ca3af', margin: '2px 0' }}>투입: {((d.totalIn || 0) / 1e8).toFixed(2)}억</p>
     </div>
@@ -495,6 +529,7 @@ function BacktestDetail({ window: win, settings }) {
 
   const sellDates = useMemo(() => new Set(trades.map(t => t.date)), [trades])
   const relaxedSellDates = useMemo(() => new Set(trades.filter(t => t.relaxed).map(t => t.date)), [trades])
+  const throttleRsi = throttleFirstTier(settings)?.[0] ?? null
 
   // 부스터 발동(조건 충족) 구간을 연속 구간으로 묶어서 차트 음영 표시용으로 변환
   const boostRanges = useMemo(() => {
@@ -512,9 +547,25 @@ function BacktestDetail({ window: win, settings }) {
   }, [daily])
   const boostBoundaryDates = useMemo(() => new Set(boostRanges.flat()), [boostRanges])
 
+  // 과열 스로틀이 걸리는 날(=RSI가 임계 이상)의 경계일. 차트를 5일 간격으로 솎아내므로
+  // 경계일을 따로 남겨두지 않으면 음영/색 전환 지점이 최대 5일씩 밀린다.
+  const hotBoundaryDates = useMemo(() => {
+    const set = new Set()
+    let prev = false
+    for (let i = 0; i < daily.length; i++) {
+      const hot = throttlePctForRsi(daily[i].rsi, settings) !== null
+      if (hot !== prev) {
+        set.add(daily[i].date)
+        if (i > 0) set.add(daily[i - 1].date)
+      }
+      prev = hot
+    }
+    return set
+  }, [daily, settings])
+
   const chartData = useMemo(() => {
     return daily
-      .filter((d, i) => i % 5 === 0 || sellDates.has(d.date) || boostBoundaryDates.has(d.date))
+      .filter((d, i) => i % 5 === 0 || sellDates.has(d.date) || boostBoundaryDates.has(d.date) || hotBoundaryDates.has(d.date))
       .map(d => ({
         date: d.date,
         pool: d.pool,
@@ -523,10 +574,33 @@ function BacktestDetail({ window: win, settings }) {
         priceUSD: d.priceUSD,
         rsi: d.rsi,
         disp: d.disp,
+        hot: throttlePctForRsi(d.rsi, settings) !== null,
         sell: sellDates.has(d.date) ? d.total : null,
         sellRelaxed: relaxedSellDates.has(d.date),
       }))
-  }, [daily, sellDates, relaxedSellDates, boostBoundaryDates])
+  }, [daily, sellDates, relaxedSellDates, boostBoundaryDates, hotBoundaryDates, settings])
+
+  // 주식 영역을 구간별로 다른 색으로 칠하기 위한 가로 그라디언트 stop 목록.
+  // 전환 지점마다 같은 offset에 stop을 두 개 찍어 색이 그라데이션 없이 딱 끊기게 한다.
+  // (Recharts의 Area는 하나의 path라서 색을 나누려면 이 방법뿐이다.)
+  const stockStops = useMemo(() => {
+    const n = chartData.length
+    if (!n) return []
+    if (n === 1) return [{ offset: 0, hot: !!chartData[0].hot }, { offset: 1, hot: !!chartData[0].hot }]
+    const stops = [{ offset: 0, hot: !!chartData[0].hot }]
+    let prev = !!chartData[0].hot
+    for (let i = 1; i < n; i++) {
+      const hot = !!chartData[i].hot
+      if (hot !== prev) {
+        const off = i / (n - 1)
+        stops.push({ offset: off, hot: prev }, { offset: off, hot })
+        prev = hot
+      }
+    }
+    stops.push({ offset: 1, hot: prev })
+    return stops
+  }, [chartData])
+  const hasHot = useMemo(() => stockStops.some(s => s.hot), [stockStops])
 
   // 부스터/완화매도 on-off 4가지 조합을 한번에 비교 (체크박스 일일이 바꿔가며
   // 재조회하지 않아도 되도록). '세팅값'은 현재 파라미터 패널에 적용된 그대로.
@@ -630,6 +704,13 @@ function BacktestDetail({ window: win, settings }) {
 
       <ResponsiveContainer width="100%" height={380}>
         <ComposedChart data={chartData}>
+          <defs>
+            <linearGradient id="stockSplit" x1="0" y1="0" x2="1" y2="0">
+              {stockStops.map((st, i) => (
+                <stop key={i} offset={`${(st.offset * 100).toFixed(4)}%`} stopColor={st.hot ? HOT_COLOR : STOCK_COLOR} />
+              ))}
+            </linearGradient>
+          </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="#2e303a" />
           <XAxis dataKey="date" minTickGap={80} />
           <YAxis tickFormatter={v => `${(v / 1e8).toFixed(1)}억`} width={55} />
@@ -644,7 +725,7 @@ function BacktestDetail({ window: win, settings }) {
           />
           <Area
             type="monotone" dataKey="stock" stackId="1"
-            fill="#10b981" fillOpacity={0.6} stroke="#10b981" strokeWidth={1}
+            fill="url(#stockSplit)" fillOpacity={0.6} stroke="url(#stockSplit)" strokeWidth={1}
             isAnimationActive={false}
           />
           <Line
@@ -655,10 +736,20 @@ function BacktestDetail({ window: win, settings }) {
           <Scatter dataKey="sell" shape={<SellDot />} isAnimationActive={false} />
         </ComposedChart>
       </ResponsiveContainer>
-      {settings.enabled && boostRanges.length > 0 && (
-        <div style={{ fontSize: 12, color: '#9ca3af', marginTop: -18, marginBottom: 18 }}>
-          <span style={{ display: 'inline-block', width: 10, height: 10, background: '#f59e0b', opacity: 0.4, marginRight: 6, verticalAlign: 'middle' }} />
-          음영 구간 = POOL 부스터 발동 중 (고점 대비 -{settings.drawdownPct}% 이상 하락)
+      {(hasHot || (settings.enabled && boostRanges.length > 0)) && (
+        <div style={{ fontSize: 12, color: '#9ca3af', marginTop: -18, marginBottom: 18, display: 'flex', gap: 18, flexWrap: 'wrap' }}>
+          {settings.enabled && boostRanges.length > 0 && (
+            <span>
+              <span style={{ display: 'inline-block', width: 10, height: 10, background: '#f59e0b', opacity: 0.4, marginRight: 6, verticalAlign: 'middle' }} />
+              세로 음영 = POOL 부스터 발동 중 (고점 대비 -{settings.drawdownPct}% 이상 하락)
+            </span>
+          )}
+          {hasHot && (
+            <span>
+              <span style={{ display: 'inline-block', width: 10, height: 10, background: HOT_COLOR, opacity: 0.75, marginRight: 6, verticalAlign: 'middle' }} />
+              주식 영역이 주황색 = RSI(14) {throttleRsi} 이상 과열 스로틀 구간 (그 주 POOL 재투자 중단, 정액 적립은 유지)
+            </span>
+          )}
         </div>
       )}
 
