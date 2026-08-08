@@ -397,8 +397,23 @@ export function getRollingWindows(settings = DEFAULT_SETTINGS) {
       }
     }
   };
-  push(TQQQ_DATA, 'real');
+  // 합성이 앞 기간이므로 먼저 넣어 시간순으로 배열한다.
   push(SIM_DATA, 'sim', d => d < DATA_START);
+  push(TQQQ_DATA, 'real');
+
+  // 실질 독립 표본에 해당하는 창을 표시한다. 가장 오래된 창부터 시작해서
+  // "앞 창이 끝난 뒤에 시작하는" 창만 탐욕적으로 이어 붙이면 서로 겹치지 않는
+  // 사슬이 나온다. 전체 27.4년 / 창 5년 = 5.5개가 이론적 상한이고 실제로 5개가
+  // 잡힌다. 나머지 18개는 이 5개와 데이터를 나눠 쓰는 것이라 별도 표본이 아니다.
+  // (사슬은 어디서 시작하느냐에 따라 달라진다. 여기서는 닷컴 구간을 포함하도록
+  //  가장 오래된 창을 기점으로 잡았다.)
+  let chainEnd = '';
+  for (const w of result) {
+    if (w.startDate >= chainEnd) {
+      w.independent = true;
+      chainEnd = w.endDate;
+    }
+  }
   return result;
 }
 

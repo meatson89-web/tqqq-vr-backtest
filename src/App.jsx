@@ -470,15 +470,23 @@ function WindowGrid({ windows, selected, onSelect }) {
         return (
           <div
             key={w.id}
-            className={`window-card ${colorClass}${isSelected ? ' selected' : ''}`}
+            className={`window-card ${colorClass}${isSelected ? ' selected' : ''}${w.independent ? ' independent' : ''}`}
             onClick={() => onSelect(w)}
             style={w.source === 'sim' ? { borderStyle: 'dashed' } : undefined}
           >
-            <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 6 }}>
+            {/* 합성·독립 배지까지 한 줄에 들어가야 카드 높이가 들쭉날쭉해지지 않는다 */}
+            <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4, whiteSpace: 'nowrap' }}>
               {fmtMonthYear(w.startDate)}~{fmtMonthYear(w.endDate)}
-              {w.source === 'sim' && <span style={{ color: '#a78bfa', marginLeft: 5 }}>합성</span>}
+              {w.source === 'sim' && <span style={{ fontSize: 10, color: '#a78bfa', marginLeft: 4 }}>합성</span>}
+              {w.independent && <span style={{ fontSize: 10, color: '#d4d47a', marginLeft: 4 }}>독립</span>}
             </div>
-            <div style={{ fontSize: 13, color: '#e2e8f0' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#e2e8f0' }}>
+              {fmtB(w.stats.finalAfterTax)}
+              <span style={{ fontSize: 11, fontWeight: 400, color: '#9ca3af', marginLeft: 4 }}>
+                / 납입 {fmtB(w.stats.totalIn)}
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: '#e2e8f0', marginTop: 3 }}>
               수익률 {fmtPct(returnPct)}&nbsp;&nbsp;IRR {w.stats.irr.toFixed(0)}%
             </div>
             <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 3 }}>
@@ -852,6 +860,7 @@ function App() {
   const windows = useMemo(() => getRollingWindows(settings), [settings])
   const realCount = windows.filter(w => w.source === 'real').length
   const simCount = windows.length - realCount
+  const indepCount = windows.filter(w => w.independent).length
   const [sel, setSel] = useState(null)
   const [view, setView] = useState('rolling')
 
@@ -883,14 +892,19 @@ function App() {
           {view === 'rolling' && (
             <>
               <section className="section-title">
-                5년 롤링 윈도우 (1년씩 슬라이드) — 실제 {realCount}개 + 합성 {simCount}개 = {windows.length}개
+                5년 롤링 윈도우 (1년씩 슬라이드) — 합성 {simCount}개 + 실제 {realCount}개 = {windows.length}개 (독립 표본 {indepCount}개)
               </section>
               <p style={{ fontSize: 12, color: '#9ca3af', textAlign: 'left', margin: '-8px 0 12px' }}>
-                실제 TQQQ {DATA_START.slice(0, 7)}~{DATA_END.slice(0, 7)}에 5년 창을 1년씩 밀어 {realCount}개,
-                여기에 실제 데이터가 없는 {SIM_START.slice(0, 7)}~{DATA_START.slice(0, 7)} 구간을 합성 TQQQ로 {simCount}개 더했습니다(점선 카드).
-                합성 창 중 2010-02 이후 시작분은 실제 창과 같은 기간이라 뺐습니다.
-                {' '}<b>창 {windows.length}개가 검증 {windows.length}회는 아닙니다</b> — 이웃끼리 4년씩 겹치므로
-                실질 독립 표본은 전체 27.4년 ÷ 5년 = 약 5.5개입니다.
+                오래된 순. 앞쪽 {simCount}개는 실제 데이터가 없는 {SIM_START.slice(0, 7)}~{DATA_START.slice(0, 7)} 구간을
+                합성 TQQQ로 채운 것이고(점선 카드), 뒤쪽 {realCount}개가 실제 TQQQ {DATA_START.slice(0, 7)}~{DATA_END.slice(0, 7)}입니다.
+                5년 창을 1년씩 밀었습니다. 합성 창 중 2010-02 이후 시작분은 실제 창과 같은 기간이라 뺐습니다.
+              </p>
+              <p style={{ fontSize: 12, color: '#9ca3af', textAlign: 'left', margin: '0 0 12px' }}>
+                <span style={{ display: 'inline-block', width: 10, height: 10, background: '#3a3a24', border: '1px solid #a3a34d', marginRight: 6, verticalAlign: 'middle' }} />
+                <b>카키색 {indepCount}개 = 실질 독립 표본.</b> 가장 오래된 창부터 서로 겹치지 않게 이어 붙인 사슬입니다
+                (전체 27.4년 ÷ 창 5년 = 5.5개가 상한). <b>창 {windows.length}개가 검증 {windows.length}회는 아닙니다</b> —
+                나머지 {windows.length - indepCount}개는 이 {indepCount}개와 데이터를 4년씩 나눠 쓰는 것이라 별도 표본이 아닙니다.
+                겹치는 창을 독립인 양 세면 신뢰구간이 실제보다 좁게 나옵니다.
               </p>
               <WindowGrid windows={windows} selected={sel} onSelect={setSel} />
               {sel && !isCustomWindow(sel) && <BacktestDetail window={sel} settings={settings} />}

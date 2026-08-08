@@ -193,6 +193,9 @@ header .sub {
 .window-card.green { border-left: 3px solid #10b981; }
 .window-card.yellow { border-left: 3px solid #f59e0b; }
 .window-card.red { border-left: 3px solid #ef4444; }
+/* 겹치지 않게 이어 붙인 5개 — 이 화면에서 실질 독립 표본에 해당하는 창 */
+.window-card.independent { background: #3a3a24; }
+.window-card.independent:hover { border-color: #a3a34d; }
 
 /* stats bar */
 .stats-bar { display: flex; gap: 20px; flex-wrap: wrap; background: #1e2030; border-radius: 8px; padding: 14px 20px; margin-bottom: 12px; }
