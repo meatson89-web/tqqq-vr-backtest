@@ -81,6 +81,12 @@ export const DEFAULT_SETTINGS = {
   // 100%는 전체구간 수치가 더 좋지만 한 주에 다 써버려 급반등 구간이 -0.8%로 꺾인다.
   enabled: true, lookback: 60, drawdownPct: 30, ratioPct: 60,
   initialKRW: 100_000_000, weeklyKRW: 850_000, poolCapKRW: 200_000_000,
+  // 수익실현 매도 RSI 임계. 70 → 73으로 올렸다.
+  // 71~75가 연속으로 개선되는 "고원"이지 단일 봉우리가 아니다. 70에서만 걸리던
+  // 매도 12건 중 7건은 이후 낙폭이 -13% 이내여서 세금만 내고 끝났을 거래였다.
+  // POOL 재투입이 주 5%로 느려서, 일찍 팔아 폭락을 피해 번 것보다 반등에 못
+  // 올라타 잃은 게 컸다. 23창 재측정: scripts/sweep-sellrsi.mjs
+  sellRsi: 73,
   // 완화매도: 마지막 수익실현 매도 후 relaxMonths개월 이상 지나면 RSI/이격도
   // 기준을 낮춰서 매도(수익률 25% 기준은 유지), 매도 비율도 relaxSellFrac로 축소.
   // 46개 롤링 구간 스윕 검증값(평균 총자산 +1.8%, 2018-08 미스 케이스 해결)이 기본값.
@@ -139,14 +145,8 @@ function isWednesday(dateStr) {
 
 const TRADING_DAYS_PER_MONTH = 21;
 
-// 수익실현 매도 임계. 70 → 73으로 올렸다.
-// 근거: RSI 71~75가 연속으로 전부 개선되는 "고원"이고(단일 봉우리가 아님),
-//   겹치지 않는 독립 5년 구간 3개에서 모두 세후 총자산이 늘었다(+5.9/+0.5/+6.8%).
-//   70에서만 걸리던 매도는 12건인데 그중 7건은 이후 낙폭이 -13% 이내여서
-//   세금만 내고 끝났을 거래였다. 놓치는 큰 하락(2020-02, 2018-08)을 포함하는
-//   윈도우로 따로 검증했을 때도 19개 중 19개에서 73이 우세했다 — POOL 재투입이
-//   주 5%로 느려서, 폭락을 피해 번 것보다 반등에 못 올라타 잃은 게 컸다.
-const SELL_RSI = 73;
+// 수익실현 매도 임계. settings.sellRsi로 옮겨 화면·검증 스크립트에서 조정 가능하다.
+// (DEFAULT_SETTINGS.sellRsi = 73. 근거는 그쪽 주석에.)
 const SELL_DISP = 40;
 
 // 평상시 주간 POOL 재투자 비율. 부스터 조건을 만족한 주에만 settings.ratioPct로 올라간다.
@@ -201,6 +201,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   const relaxDays = relaxMonths * TRADING_DAYS_PER_MONTH;
 
   const taxEnabled = booster.taxEnabled ?? DEFAULT_SETTINGS.taxEnabled;
+  const SELL_RSI = booster.sellRsi ?? DEFAULT_SETTINGS.sellRsi;
 
   const throttleTiers = booster.throttleEnabled
     ? [...(booster.throttleTiers ?? DEFAULT_SETTINGS.throttleTiers)].sort((a, b) => a[0] - b[0])
@@ -484,7 +485,8 @@ export function getBoosterStatus(settings = DEFAULT_SETTINGS) {
 }
 
 // ── 매도조건 상황판: RSI/이격도 현재값 + 목표가 도달 시나리오 ────────────────
-export function getSellConditionStatus() {
+export function getSellConditionStatus(settings = DEFAULT_SETTINGS) {
+  const SELL_RSI = settings.sellRsi ?? DEFAULT_SETTINGS.sellRsi;
   const n = TQQQ_DATA.length;
   const lastIdx = n - 1;
   const priceUSD = _closes[lastIdx];

@@ -31,21 +31,22 @@ function isCustomWindow(win) {
   return String(win.id).startsWith('custom-')
 }
 
-const FIXED_RULES = [
+// 매도 RSI만 파라미터 패널에서 조정 가능하므로 settings에서 읽는다.
+const rulesOf = settings => [
   { label: 'MA 기간', value: '180일' },
   { label: '이격도 기준', value: '> 40%' },
-  { label: 'RSI(14)', value: '≥ 73' },
+  { label: 'RSI(14)', value: `≥ ${settings.sellRsi}` },
   { label: '수익률 기준', value: '≥ 25%' },
   { label: '매도 비율', value: '주식 70%' },
   { label: '매도 쿨다운', value: '10거래일' },
   { label: '과열 스로틀', value: 'RSI ≥ 70 → POOL 0%' },
 ]
 
-function RulesPanel() {
+function RulesPanel({ settings }) {
   return (
     <div className="rules-panel">
       <div className="rules-grid">
-        {FIXED_RULES.map(r => (
+        {rulesOf(settings).map(r => (
           <div key={r.label} className="rule-item">
             <div className="rule-label">{r.label}</div>
             <div className="rule-value">{r.value}</div>
@@ -78,15 +79,57 @@ function StrategyInfo() {
           <b>매수</b> — 시작일에 초기 투입금을 일시 매수하고, 이후 매주 수요일마다 정액을 적립매수합니다.
         </p>
         <p>
-          <b>매도</b> — <i>주가가 180일 이동평균보다 40%를 초과해서 높고</i>, <i>RSI(14)가 73 이상</i>이고,
+          <b>매도</b> — <i>주가가 180일 이동평균보다 40%를 초과해서 높고</i>, <i>RSI(14)가 매도 임계 이상</i>이고,
           <i> 평단가 대비 수익률이 25% 이상</i>인 세 조건을 동시에 만족하면 보유 주식의 70%를 매도합니다.
           매도 직후 10거래일 동안은 재매도하지 않습니다(쿨다운).
-          <b> RSI 기준은 70에서 73으로 올렸습니다</b> — 71~75가 연속으로 개선되는 구간이고,
-          겹치지 않는 독립 5년 구간 3개에서 모두 세후 총자산이 늘었습니다(+5.9 / +0.5 / +6.8%).
-          70에서만 걸리던 매도 12건 중 7건은 이후 낙폭이 -13% 이내라 세금만 내고 끝났을 거래였습니다.
-          <b> 단, 이 수치만 옛 기준입니다</b> — 창 기준을 바꾸기 전(실제 TQQQ만, 분기 슬라이드 46창,
-          겹치지 않는 3구간)에 측정한 값이고 아직 위의 23창 기준으로 다시 재지 않았습니다.
-          매도 RSI는 화면에서 조정할 수 없는 고정 상수라 다른 항목처럼 자동으로 재측정되지 않습니다.
+          매도 RSI 임계는 상단 파라미터 패널에서 조정할 수 있고 기본값은 73입니다.
+        </p>
+        <p>
+          <b>매도 RSI 임계 — 23창 재측정</b> (73 대비 세후 총자산 차이). 아래로 내리는 건 확실히
+          나쁘고, 올리는 건 평균은 좋아지지만 신뢰구간이 벌어집니다.
+        </p>
+        <table className="sell-table" style={{ marginTop: 0 }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left' }}>매도 RSI</th>
+              <th>23창 평균</th><th>개선</th><th>블록 95% CI</th>
+              <th>독립 5창</th><th>QLD</th><th>전체구간 세후</th><th>매도수</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[
+              ['70', '-6.1%', '7/23', '[-12.7, -0.6]', '-4.2% (1/5)', '-0.9%', '850.4억', '33회'],
+              ['72', '-2.5%', '1/23', '[-5.5, -0.3]', '-1.5% (0/5)', '+0.0%', '1086.1억', '28회'],
+              ['73 (현재)', '—', '—', '—', '—', '—', '1218.0억', '26회'],
+              ['74', '+1.7%', '17/23', '[0.1, 3.7]', '+4.9% (4/5)', '+0.4%', '1300.6억', '25회'],
+              ['76', '+3.7%', '13/23', '[-1.7, 11.0]', '+5.0% (4/5)', '+0.5%', '1476.1억', '19회'],
+              ['80', '+6.1%', '13/23', '—', '+12.6%', '—', '1265.4억', '12회'],
+              ['85', '-1.9%', '10/23', '—', '+10.5%', '—', '692.8억', '2회'],
+              ['90+ (사실상 매도 없음)', '-1.1%', '10/23', '—', '+11.4%', '—', '753.6억', '0회'],
+            ].map(r => (
+              <tr key={r[0]} className={r[0].startsWith('73') ? 'row-current' : undefined}>
+                {r.map((c, i) => <td key={i} style={i === 0 ? { textAlign: 'left' } : undefined}>{c}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p>
+          <b>확실한 것</b> — <i>72 이하로 내리면 안 됩니다.</i> 70은 23창 평균 -6.1%, 독립 5창에서 1/5,
+          QLD에서도 -0.9%로 세 데이터가 모두 같은 방향입니다. 자주 팔면 세금만 내고 반등에 못 올라탑니다.
+          {' '}<i>82 이상도 안 됩니다.</i> 매도가 8회 이하로 줄면서 전체 구간이 1476억 → 747억으로
+          무너지고, 90 이상은 매도가 아예 안 걸려 순수 적립식(753.6억)과 같아집니다.
+          즉 <b>내부 최적점이 실제로 존재하며 대략 74~80 사이</b>입니다.
+        </p>
+        <p>
+          <b>불확실한 것 — 그 안에서 어디인지.</b> 지표마다 봉우리가 다릅니다: 전체 구간은 76(1476억),
+          23창 평균은 80(+6.1%), 독립 5창은 82(+13.4%)에서 정점입니다. 게다가 74를 넘으면
+          <b> 신뢰구간이 0을 포함하기 시작합니다</b>(76은 [-1.7, 11.0]). 평균을 끌어올리는 건 소수의 창,
+          특히 합성 2009-03~2014-03 한 창입니다(74에서 +19.7%, 78에서 +52.9%).
+          {' '}<b>기본값을 73으로 두는 이유</b> — 74가 유일하게 신뢰구간이 0을 벗어나고(+1.7%, [0.1, 3.7])
+          승률도 17/23으로 가장 높지만, 개선폭이 작고 이미 한 번 최적화한 파라미터를 같은 데이터로
+          또 옮기는 것이라 과최적화 위험이 누적됩니다. 74~76으로 올리고 싶다면 파라미터 패널에서
+          직접 바꿔 확인해 보세요 — 이 구간 안에서는 어느 값이든 크게 틀리지 않습니다.
+          (<code>scripts/sweep-sellrsi.mjs</code>)
         </p>
         <p>
           <b>POOL 재투자</b> — 매도로 확보한 현금은 POOL에 쌓이고, 매주 수요일 POOL 잔고의 5%가
@@ -202,13 +245,15 @@ function StrategyInfo() {
         <p>
           <b>파라미터</b> — 초기 투입금, 수요일 적립금, POOL 비중캡 기준, 부스터 조건은 상단
           파라미터 패널에서 직접 바꾸고 "적용"을 누르면 모든 백테스트(롤링 윈도우 + 직접 기간 설정)에
-          한번에 반영됩니다. 매도 조건(이격도 40%·RSI 73·수익률 25%·매도비율 70%·쿨다운 10일)과
-          과열 스로틀(RSI 70 → 0%)은 화면에서 조정할 수 없는 고정 상수입니다.
+          한번에 반영됩니다. 매도 RSI 임계도 파라미터로 열어 두었습니다.
+          나머지 매도 조건(이격도 40%·수익률 25%·매도비율 70%·쿨다운 10일)과
+          과열 스로틀(RSI 70 → POOL 0%)은 화면에서 조정할 수 없는 고정 상수입니다.
         </p>
         <p style={{ color: '#9ca3af', fontSize: 12 }}>
           위 검증 수치를 다시 뽑는 스크립트: <code>scripts/restate-evidence.mjs</code>(옵션별 23창 재측정),{' '}
-          <code>scripts/window-design.mjs</code>(슬라이드 간격 비교), <code>scripts/opt-rsi-throttle6.mjs</code>(합성 90창),{' '}
-          <code>scripts/validate.mjs</code>(변경안 게이트). 마지막 갱신: 2026-08-08.
+          <code>scripts/sweep-sellrsi.mjs</code>(매도 RSI 스윕), <code>scripts/window-design.mjs</code>(슬라이드 간격 비교),{' '}
+          <code>scripts/opt-rsi-throttle6.mjs</code>(합성 90창), <code>scripts/validate.mjs</code>(변경안 게이트).
+          마지막 갱신: 2026-08-08.
         </p>
       </div>
     </div>
@@ -241,7 +286,13 @@ function ParametersPanel({ draft, onDraftChange, onApply, dirty }) {
         {numField('초기 투입금', draft.initialKRW / 1e8, v => set('initialKRW', v * 1e8), { step: 0.1, unit: '억원' })}
         {numField('수요일 적립금', draft.weeklyKRW / 10000, v => set('weeklyKRW', v * 10000), { step: 5, unit: '만원' })}
         {numField('POOL 비중캡 기준', draft.poolCapKRW / 1e8, v => set('poolCapKRW', v * 1e8), { step: 0.1, unit: '억원' })}
+        {numField('매도 RSI 임계', draft.sellRsi, v => set('sellRsi', v), { min: 50, max: 100, step: 1, unit: 'RSI' })}
       </div>
+      <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'left', margin: '4px 0 0' }}>
+        매도 RSI를 올리면 덜 팔고, 내리면 자주 팝니다. 90 이상이면 매도가 아예 안 걸려 순수 적립식이 됩니다.
+        72 이하는 23창 전부에서 나빠집니다. 나머지 매도 조건(이격도 40%·수익률 25%·매도비율 70%·쿨다운 10일)과
+        과열 스로틀(RSI 70 → POOL 0%)은 고정입니다.
+      </p>
 
       <div className="param-divider" />
 
@@ -430,8 +481,8 @@ function BoosterStatusPanel({ settings }) {
   )
 }
 
-function SellStatusPanel() {
-  const s = useMemo(() => getSellConditionStatus(), [])
+function SellStatusPanel({ settings }) {
+  const s = useMemo(() => getSellConditionStatus(settings), [settings])
   const [avgCostInput, setAvgCostInput] = useState('')
   const [gain, setGain] = useState(null)
 
@@ -448,12 +499,12 @@ function SellStatusPanel() {
       <h3 className="panel-heading">매도조건 상황판 <span style={{ fontWeight: 400, fontSize: 12, color: '#6b7280' }}>(기준일 {s.date}, 매일 자동 갱신)</span></h3>
       <div className="status-grid">
         <StatusItem label="TQQQ 현재가" value={`$${s.priceUSD.toFixed(2)}`} />
-        <StatusItem label="RSI(14)" value={s.rsiNow.toFixed(1)} tone={s.rsiMet ? 'ok' : undefined} />
+        <StatusItem label={`RSI(14) — 기준 ≥ ${s.sellRsi}`} value={s.rsiNow.toFixed(1)} tone={s.rsiMet ? 'ok' : undefined} />
         <StatusItem label="180일 이격도" value={`${s.dispNow.toFixed(1)}%`} tone={s.dispMet ? 'ok' : undefined} />
         <StatusItem label="이격도 40% 도달가" value={`$${s.targetPrice.toFixed(2)} (+${s.neededPct.toFixed(1)}%)`} />
       </div>
 
-      <div className="sub-heading" style={{ color: '#9ca3af' }}>목표가 도달 기간별 예상 RSI</div>
+      <div className="sub-heading" style={{ color: '#9ca3af' }}>목표가 도달 기간별 예상 RSI (기준 ≥ {s.sellRsi})</div>
       <table className="sell-table">
         <thead>
           <tr>
@@ -919,7 +970,7 @@ function App() {
         <h1>TQQQ MA180 전략 대시보드</h1>
         <div className="sub">데이터 최신일: {DATA_END} (매일 자동 갱신)</div>
       </header>
-      <RulesPanel />
+      <RulesPanel settings={settings} />
       <ParametersPanel draft={draft} onDraftChange={setDraft} onApply={applySettings} dirty={dirty} />
 
       <div className="layout">
@@ -927,7 +978,7 @@ function App() {
         <div className="main-content">
           {view === 'info' && <StrategyInfo />}
           {view === 'boosterStatus' && <BoosterStatusPanel settings={settings} />}
-          {view === 'sellStatus' && <SellStatusPanel />}
+          {view === 'sellStatus' && <SellStatusPanel settings={settings} />}
 
           {view === 'custom' && (
             <>
