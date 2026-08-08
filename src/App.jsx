@@ -273,6 +273,12 @@ function numField(label, value, onChange, opts = {}) {
         />
         <em>{opts.unit}</em>
       </span>
+      {/* preset = [공격형(현재 기본값), 보수형(D)] 값 표기. 표기만 하고 자동 적용은 안 한다. */}
+      {opts.preset && (
+        <span className="param-preset">
+          공격 <b>{opts.preset[0]}</b> · 보수 <b className={opts.preset[0] === opts.preset[1] ? '' : 'diff'}>{opts.preset[1]}</b>
+        </span>
+      )}
     </label>
   )
 }
@@ -282,11 +288,19 @@ function ParametersPanel({ draft, onDraftChange, onApply, dirty }) {
   return (
     <div className="rules-panel param-panel">
       <h3 className="panel-heading">파라미터 설정</h3>
+      {/* 각 칸 아래의 "공격 / 보수"는 표기일 뿐 자동 적용되지 않는다. 직접 입력하고 적용을 누른다.
+          보수형 근거: scripts/design-defensive3.mjs(3,815설정 전수), scripts/compare-D.mjs(23창 비교) */}
+      <p className="param-preset-note">
+        각 칸 아래 <b>공격</b>은 현재 기본값, <b>보수</b>는 낙폭을 줄인 방어형 설정입니다. 표기만 되며 자동 적용되지 않으니
+        직접 입력하고 <b>적용</b>을 누르세요. 보수형은 23창 기준 총자산 MDD 평균 -69.8% → -65.9%(개선 15창·악화 0창),
+        총자산이 5억을 넘긴 뒤의 MDD는 평균 -49.3% → -36.4%로 줄고 반토막(-50%) 넘는 창이 8/16 → 3/16이 됩니다.
+        대가는 총자산 중앙 0.90배(실제 12창 0.83배)입니다.
+      </p>
       <div className="param-grid">
         {numField('초기 투입금', draft.initialKRW / 1e8, v => set('initialKRW', v * 1e8), { step: 0.1, unit: '억원' })}
         {numField('수요일 적립금', draft.weeklyKRW / 10000, v => set('weeklyKRW', v * 10000), { step: 5, unit: '만원' })}
         {numField('POOL 비중캡 기준', draft.poolCapKRW / 1e8, v => set('poolCapKRW', v * 1e8), { step: 0.1, unit: '억원' })}
-        {numField('매도 RSI 임계', draft.sellRsi, v => set('sellRsi', v), { min: 50, max: 100, step: 1, unit: 'RSI' })}
+        {numField('매도 RSI 임계', draft.sellRsi, v => set('sellRsi', v), { min: 50, max: 100, step: 1, unit: 'RSI', preset: [73, 70] })}
       </div>
       <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'left', margin: '4px 0 0' }}>
         매도 RSI를 올리면 덜 팔고, 내리면 자주 팝니다. 90 이상이면 매도가 아예 안 걸려 순수 적립식이 됩니다.
@@ -305,9 +319,9 @@ function ParametersPanel({ draft, onDraftChange, onApply, dirty }) {
         POOL 부스터 사용 (고점 대비 급락 시 재투자 비율 상향)
       </label>
       <div className="param-grid">
-        {numField('기준 고점 기간', draft.lookback, v => set('lookback', v), { min: 5, max: 250, step: 5, unit: '거래일', disabled: !draft.enabled })}
-        {numField('하락 임계치', draft.drawdownPct, v => set('drawdownPct', v), { min: 5, max: 70, step: 1, unit: '%', disabled: !draft.enabled })}
-        {numField('재투자 비율', draft.ratioPct, v => set('ratioPct', v), { min: 5, max: 200, step: 1, unit: '%', disabled: !draft.enabled })}
+        {numField('기준 고점 기간', draft.lookback, v => set('lookback', v), { min: 5, max: 250, step: 5, unit: '거래일', disabled: !draft.enabled, preset: [60, 120] })}
+        {numField('하락 임계치', draft.drawdownPct, v => set('drawdownPct', v), { min: 5, max: 70, step: 1, unit: '%', disabled: !draft.enabled, preset: [30, 50] })}
+        {numField('재투자 비율', draft.ratioPct, v => set('ratioPct', v), { min: 5, max: 200, step: 1, unit: '%', disabled: !draft.enabled, preset: [60, 60] })}
       </div>
 
       <div className="param-divider" />
@@ -321,10 +335,10 @@ function ParametersPanel({ draft, onDraftChange, onApply, dirty }) {
         완화매도 사용 (오래 매도 못하면 RSI·이격도 기준 낮춰서 매도)
       </label>
       <div className="param-grid">
-        {numField('미매도 기준', draft.relaxMonths, v => set('relaxMonths', v), { min: 1, max: 24, step: 1, unit: '개월', disabled: !draft.relaxEnabled })}
-        {numField('RSI 완화폭', draft.relaxRsiDrop, v => set('relaxRsiDrop', v), { min: 0, max: 40, step: 1, unit: 'p', disabled: !draft.relaxEnabled })}
-        {numField('이격도 완화폭', draft.relaxDispDrop, v => set('relaxDispDrop', v), { min: 0, max: 40, step: 1, unit: 'p', disabled: !draft.relaxEnabled })}
-        {numField('완화매도 비율', draft.relaxSellFrac * 100, v => set('relaxSellFrac', v / 100), { min: 1, max: 70, step: 1, unit: '%', disabled: !draft.relaxEnabled })}
+        {numField('미매도 기준', draft.relaxMonths, v => set('relaxMonths', v), { min: 1, max: 24, step: 1, unit: '개월', disabled: !draft.relaxEnabled, preset: [7, 5] })}
+        {numField('RSI 완화폭', draft.relaxRsiDrop, v => set('relaxRsiDrop', v), { min: 0, max: 40, step: 1, unit: 'p', disabled: !draft.relaxEnabled, preset: [0, 0] })}
+        {numField('이격도 완화폭', draft.relaxDispDrop, v => set('relaxDispDrop', v), { min: 0, max: 40, step: 1, unit: 'p', disabled: !draft.relaxEnabled, preset: [12, 20] })}
+        {numField('완화매도 비율', draft.relaxSellFrac * 100, v => set('relaxSellFrac', v / 100), { min: 1, max: 70, step: 1, unit: '%', disabled: !draft.relaxEnabled, preset: [5, 40] })}
       </div>
 
       <div className="param-divider" />
