@@ -111,6 +111,33 @@ export const DEFAULT_SETTINGS = {
   // 임계는 68~72가 평평한 고원이라 단일 봉우리에 맞춘 값이 아니다. 다만 68 아래로
   // 내리면 단조롭게 나빠진다 — RSI 65~70은 과열이 아니라 그냥 강세다.
   throttleEnabled: true, throttleTiers: [[70, 0]],
+  // 마켓오프: 이익실현 매도(이격도 40%+RSI)는 하락장에서 구조적으로 발동하지 못해
+  // 2000년·2008년 같은 구간을 그대로 맞는다. 그걸 막기 위한 별도 방어 규칙.
+  // 가격이 "평단가에 가까워지는" 정도로 판정한다 — 고점 대비 낙폭이 아니라
+  // 내 수익 쿠션이 얼마나 남았느냐가 기준이다.
+  //   marketOffTiers = [[수익률임계%, 매도비율], ...] 내림차순.
+  //     수익률이 임계 이하로 내려오면 보유 주식의 그 비율만큼 팔아 POOL로 옮긴다.
+  //     각 단은 한 번만 발동하고, 수익률이 marketOffResetGain 위로 회복하면 재무장한다.
+  //   marketOffMinAssets: 총자산이 이 금액 이상일 때만 작동. 그 아래에서는 주간
+  //     적립금(연 4400만원)만으로도 평단가를 의미 있게 낮출 수 있어 팔 이유가 없다.
+  //   marketOffLockBooster: 마켓오프가 발동한 상태에서는 부스터를 잠근다. 안 그러면
+  //     확보한 현금을 부스터가 하락 도중에 도로 쏟아부어 규칙이 상쇄된다.
+  //
+  // 검증 결과(scripts/sweep-marketoff.mjs) — 기본 OFF로 둔다.
+  //  · 이 규칙만 켜면 거의 아무 일도 안 일어난다. 23창 MDD 평균 -69.8% → -68.9%,
+  //    총자산 -3.0%. 부스터가 확보한 현금을 하락 도중에 도로 쏟아붓기 때문이다
+  //    (2018~2023 창에서 마켓오프 5.30억 매도 vs 부스터 16.35억 재투입).
+  //  · marketOffLockBooster를 켜면 실제로 작동한다. 23창 MDD 평균 -65.1%(14창 개선,
+  //    악화 0), 전체구간 MDD -80.4% → -69.7%. 2004~2009은 0.66→1.05억(+59%),
+  //    2018~2023은 8.32→9.85억(+18%).
+  //  · 그런데 대가가 크다. 전체구간 세후 1218억 → 483억(-60%), 23창 평균 -3.0%,
+  //    크게 도움 7창 vs 크게 손해 11창(2016~2021은 47.1→29.8억).
+  //  · 결정적으로, MDD 1%p를 줄이는 비용이 '부스터를 그냥 끄기'와 같다(69억 vs 66억).
+  //    정교한 방어 규칙이 아니라 부스터를 끄는 것과 같은 거래를 복잡하게 한 셈이다.
+  //  · 참고: 3억이라는 절대 기준은 자산 규모에 따라 의미가 달라진다. 1억으로 시작하는
+  //    5년 창에서는 의도대로지만, 16년 복리 구간에서는 초기에 넘긴 뒤 늘 켜져 있다.
+  marketOffEnabled: false, marketOffMinAssets: 300_000_000,
+  marketOffTiers: [[10, 0.30], [5, 0.30]], marketOffResetGain: 25, marketOffLockBooster: false,
   // 양도세: 일반 해외주식 계좌 기준. 연간 실현손익 합산 → 250만원 기본공제 → 22%(지방세 포함),
   // 이듬해 5월 납부. 매도가 잦은 전략일수록 세후 성과가 크게 달라지므로 기본 ON.
   taxEnabled: true,
@@ -197,9 +224,12 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   const rollMaxArr = boostActive ? getRollMaxArr(lookback, data) : null;
   const boostRsiMax = booster.boostRsiMax ?? DEFAULT_SETTINGS.boostRsiMax;
   // 낙폭 조건 + (선택) RSI 상한. 둘 다 만족해야 부스터가 켜진다.
+  // moFired(마켓오프 발동 상태)는 아래에서 선언하지만, 이 함수는 루프 안에서만
+  // 호출되므로 그때는 이미 초기화돼 있다.
   const boostFires = (priceUSD, rollMax, rsi) =>
     boostActive && !isNaN(rollMax) && priceUSD <= rollMax * (1 - boostDrawdownFrac) &&
-    (boostRsiMax == null || (!isNaN(rsi) && rsi <= boostRsiMax));
+    (boostRsiMax == null || (!isNaN(rsi) && rsi <= boostRsiMax)) &&
+    !(marketOffLockBooster && moFired.some(Boolean));
 
   const relaxEnabled = !!booster.relaxEnabled;
   const relaxMonths = booster.relaxMonths ?? DEFAULT_SETTINGS.relaxMonths;
@@ -210,6 +240,15 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
 
   const taxEnabled = booster.taxEnabled ?? DEFAULT_SETTINGS.taxEnabled;
   const SELL_RSI = booster.sellRsi ?? DEFAULT_SETTINGS.sellRsi;
+
+  const marketOffTiers = booster.marketOffEnabled
+    ? [...(booster.marketOffTiers ?? DEFAULT_SETTINGS.marketOffTiers)].sort((a, b) => b[0] - a[0])
+    : null;
+  const marketOffMinAssets = booster.marketOffMinAssets ?? DEFAULT_SETTINGS.marketOffMinAssets;
+  const marketOffResetGain = booster.marketOffResetGain ?? DEFAULT_SETTINGS.marketOffResetGain;
+  const marketOffLockBooster = !!booster.marketOffLockBooster;
+  // 마켓오프 각 단이 발동했는지. 재무장되면 전부 false로 돌아간다.
+  const moFired = new Array(marketOffTiers ? marketOffTiers.length : 0).fill(false);
 
   const throttleTiers = booster.throttleEnabled
     ? [...(booster.throttleTiers ?? DEFAULT_SETTINGS.throttleTiers)].sort((a, b) => a[0] - b[0])
@@ -223,7 +262,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   let realizedGain = 0, taxPaid = 0, taxDue = 0, taxDueYear = -1;
   let capApplied = 0;           // POOL 비중캡이 실제로 발동한 횟수
   const cashflows = [];         // IRR 계산용 (납입 -, 최종평가 +)
-  const daily = [], trades = [], boostTrades = [];
+  const daily = [], trades = [], boostTrades = [], marketOffTrades = [];
 
   for (let i = startIdx; i < sliceEnd; i++) {
     const [date, priceUSD] = data[i];
@@ -290,6 +329,34 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
         trades.push({ date, priceUSD, returnPct: ret * 100, rsi, disp, poolAfter: pool, sellNo, relaxed: !normalFire });
       }
 
+      // 마켓오프: 수익 쿠션이 얇아지면 단계별로 팔아 POOL로 옮긴다.
+      // 이익실현 매도와 독립이며 쿨다운을 공유하지 않는다 — 이쪽은 고점 과열이 아니라
+      // 하락을 방어하는 규칙이라 같은 날 둘 다 걸릴 일이 사실상 없다.
+      // 매도는 avgCost를 바꾸지 않으므로 팔았다고 해서 다음 단이 자동으로 당겨지지 않는다.
+      if (marketOffTiers) {
+        const totalNow = shares * price + pool;
+        if (ret * 100 >= marketOffResetGain) {
+          moFired.fill(false);          // 쿠션이 회복되면 전 단 재무장
+        } else if (totalNow >= marketOffMinAssets) {
+          for (let t = 0; t < marketOffTiers.length; t++) {
+            const [thr, frac] = marketOffTiers[t];
+            if (moFired[t] || ret * 100 > thr) continue;
+            moFired[t] = true;
+            const sellShares = shares * frac;
+            if (sellShares <= 0) continue;
+            const sellValue = sellShares * price;
+            realizedGain += sellShares * (price - avgCost);
+            shares -= sellShares;
+            pool += sellValue;
+            sellNo++;
+            marketOffTrades.push({
+              date, priceUSD, gainPct: ret * 100, tier: thr, frac,
+              soldKRW: sellValue, totalBefore: totalNow, poolAfter: pool,
+            });
+          }
+        }
+      }
+
       // Weekly buy on Wednesdays: 적립금 + pool * 재투자비율(기본 5%, 부스터 조건 충족 시 상향)
       if (isWednesday(date)) {
         totalWeeks++;
@@ -334,7 +401,9 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
     const stockValue = shares * price;
     const total = stockValue + pool;
     const boostCond = boostFires(priceUSD, rollMax, rsi);
-    daily.push({ date, priceUSD, rsi, disp, stockValue, pool, total, totalIn, boostCond });
+    // avgCost/gainPct는 원화 평단가와 그 대비 수익률. 마켓오프 규칙과 툴팁이 쓴다.
+    const gainPct = avgCost > 0 ? (price - avgCost) / avgCost * 100 : NaN;
+    daily.push({ date, priceUSD, rsi, disp, stockValue, pool, total, totalIn, boostCond, avgCost, gainPct });
   }
 
   if (!daily.length) throw new Error('백테스트 데이터가 없습니다');
@@ -364,6 +433,8 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
     finalPool: last.pool,
     totalIn,
     sellCount: trades.length,
+    marketOffCount: marketOffTrades.length,
+    marketOffSoldKRW: marketOffTrades.reduce((a, t) => a + t.soldKRW, 0),
     relaxedSellCount: trades.filter(t => t.relaxed).length,
     days,
     startDate: daily[0].date,
@@ -373,7 +444,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
     totalWeeks,
   };
 
-  return { daily, trades, boostTrades, stats };
+  return { daily, trades, boostTrades, marketOffTrades, stats };
 }
 
 // 5년(252*5거래일) 창을 1년(252거래일)씩 밀며 만든다.
