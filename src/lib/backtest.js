@@ -80,6 +80,23 @@ export const DEFAULT_SETTINGS = {
   // 기준을 낮춰서 매도(수익률 25% 기준은 유지), 매도 비율도 relaxSellFrac로 축소.
   // 46개 롤링 구간 스윕 검증값(평균 총자산 +1.8%, 2018-08 미스 케이스 해결)이 기본값.
   relaxEnabled: true, relaxMonths: 7, relaxRsiDrop: 0, relaxDispDrop: 12, relaxSellFrac: 0.05,
+  // 과열 스로틀: 수요일 POOL 재투자 비율(평상시 5%)을 그날 RSI 구간별로 낮춘다.
+  // tiers = [[RSI임계, 재투자%], ...] 오름차순. RSI가 넘긴 임계 중 가장 높은 단이 적용된다.
+  // 부스터가 켜진 주(고점 대비 급락)에는 적용하지 않는다 — 조건상 겹치지 않는다.
+  //
+  // RSI 70 이상에서 POOL 재투자를 완전히 멈춘다. 매도는 RSI 73 부근에서 일어나므로
+  // 그 직후 몇 주는 POOL이 크고 RSI는 아직 높다. 이때 평소대로 5%를 사면 방금 판
+  // 가격 근처에서 되사서 평단가를 올리고 곧 오는 조정을 그대로 맞는다.
+  //   · 세후 롤링 46구간 평균 +2.7%, 블록부트스트랩 95% CI [0.1, 5.2] (0을 포함하지 않음)
+  //   · 겹치지 않는 독립 5년 3구간: -0.4% / +7.0% / +2.7%, 전체구간 +10.4%, MDD -0.1%p
+  //   · 발동 98/850주(12%). 수요일 정액 적립금은 그대로 들어가고 POOL 부분만 멈춘다.
+  // "그냥 덜 사서" 좋아진 게 아니다 — 이 규칙은 총 POOL 재투자액을 오히려 0.9% 늘린다
+  // (안 쓴 돈이 POOL에 남아 잔고가 커지고 나중에 그 5%로 더 많이 들어간다). RSI 조건
+  // 없이 상시 비율만 낮춘 대조군은 같은 +10%를 얻으려 재투자액을 51% 줄여야 하고
+  // 2011~2016 구간을 -17% 망가뜨린다. 부스터를 꺼도 효과가 남는다(전체구간 +2.9%).
+  // 임계는 68~72가 평평한 고원이라 단일 봉우리에 맞춘 값이 아니다. 다만 68 아래로
+  // 내리면 단조롭게 나빠진다 — RSI 65~70은 과열이 아니라 그냥 강세다.
+  throttleEnabled: true, throttleTiers: [[70, 0]],
   // 양도세: 일반 해외주식 계좌 기준. 연간 실현손익 합산 → 250만원 기본공제 → 22%(지방세 포함),
   // 이듬해 5월 납부. 매도가 잦은 전략일수록 세후 성과가 크게 달라지므로 기본 ON.
   taxEnabled: true,
@@ -180,9 +197,13 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
 
   const taxEnabled = booster.taxEnabled ?? DEFAULT_SETTINGS.taxEnabled;
 
+  const throttleTiers = booster.throttleEnabled
+    ? [...(booster.throttleTiers ?? DEFAULT_SETTINGS.throttleTiers)].sort((a, b) => a[0] - b[0])
+    : null;
+
   let shares = 0, avgCost = 0, pool = 0, totalIn = 0;
   let cooldown = 0, sellNo = 0, started = false;
-  let boostedWeeks = 0, totalWeeks = 0;
+  let boostedWeeks = 0, totalWeeks = 0, throttledWeeks = 0;
   let lastSellIdx = startIdx;
   // 양도세 누적: 당해 실현손익 → 연말에 세액 확정 → 이듬해 5월 납부
   let realizedGain = 0, taxPaid = 0, taxDue = 0, taxDueYear = -1;
@@ -264,6 +285,9 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
           poolRatio = boostFrac;
           boostedWeeks++;
           wasBoosted = true;
+        } else if (throttleTiers && !isNaN(rsi)) {
+          for (const [thr, pct] of throttleTiers) if (rsi >= thr) poolRatio = pct / 100;
+          if (poolRatio < BASE_POOL_RATIO) throttledWeeks++;
         }
         const boost = pool * poolRatio;
         if (wasBoosted && boost > 0) {
@@ -331,6 +355,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
     startDate: daily[0].date,
     endDate: last.date,
     boostedWeeks,
+    throttledWeeks,
     totalWeeks,
   };
 
