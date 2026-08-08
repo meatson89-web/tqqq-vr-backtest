@@ -80,6 +80,9 @@ export const DEFAULT_SETTINGS = {
   // 단조 개선되는 고원이고, 60% 부근에서 코로나형 급반등 성과가 정점(+6.0%)이다.
   // 100%는 전체구간 수치가 더 좋지만 한 주에 다 써버려 급반등 구간이 -0.8%로 꺾인다.
   enabled: true, lookback: 60, drawdownPct: 30, ratioPct: 60,
+  // 부스터 AND 조건(선택). null이면 낙폭만 본다. 값을 주면 "그날 RSI ≤ 이 값"까지
+  // 만족해야 부스터가 켜진다 — 낙폭은 컸지만 이미 반등이 시작된 주를 걸러내려는 것.
+  boostRsiMax: null,
   initialKRW: 100_000_000, weeklyKRW: 850_000, poolCapKRW: 200_000_000,
   // 수익실현 매도 RSI 임계. 70 → 73으로 올렸다.
   // 71~75가 연속으로 개선되는 "고원"이지 단일 봉우리가 아니다. 70에서만 걸리던
@@ -192,6 +195,11 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   const initialKRW = booster.initialKRW ?? DEFAULT_SETTINGS.initialKRW;
   const lookback = booster.lookback ?? DEFAULT_SETTINGS.lookback;
   const rollMaxArr = boostActive ? getRollMaxArr(lookback, data) : null;
+  const boostRsiMax = booster.boostRsiMax ?? DEFAULT_SETTINGS.boostRsiMax;
+  // 낙폭 조건 + (선택) RSI 상한. 둘 다 만족해야 부스터가 켜진다.
+  const boostFires = (priceUSD, rollMax, rsi) =>
+    boostActive && !isNaN(rollMax) && priceUSD <= rollMax * (1 - boostDrawdownFrac) &&
+    (boostRsiMax == null || (!isNaN(rsi) && rsi <= boostRsiMax));
 
   const relaxEnabled = !!booster.relaxEnabled;
   const relaxMonths = booster.relaxMonths ?? DEFAULT_SETTINGS.relaxMonths;
@@ -287,7 +295,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
         totalWeeks++;
         let poolRatio = BASE_POOL_RATIO;
         let wasBoosted = false;
-        if (boostActive && !isNaN(rollMax) && priceUSD <= rollMax * (1 - boostDrawdownFrac)) {
+        if (boostFires(priceUSD, rollMax, rsi)) {
           poolRatio = boostFrac;
           boostedWeeks++;
           wasBoosted = true;
@@ -325,7 +333,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
 
     const stockValue = shares * price;
     const total = stockValue + pool;
-    const boostCond = boostActive && !isNaN(rollMax) && priceUSD <= rollMax * (1 - boostDrawdownFrac);
+    const boostCond = boostFires(priceUSD, rollMax, rsi);
     daily.push({ date, priceUSD, rsi, disp, stockValue, pool, total, totalIn, boostCond });
   }
 
