@@ -5,6 +5,7 @@ import {
 } from 'recharts'
 import {
   getRollingWindows, runFinalBacktest, DEFAULT_SETTINGS, DATA_START, DATA_END,
+  SIM_START, dataForSource,
   getBoosterStatus, getSellConditionStatus, checkGainCondition,
   throttlePctForRsi, throttleFirstTier,
 } from './lib/backtest'
@@ -471,9 +472,11 @@ function WindowGrid({ windows, selected, onSelect }) {
             key={w.id}
             className={`window-card ${colorClass}${isSelected ? ' selected' : ''}`}
             onClick={() => onSelect(w)}
+            style={w.source === 'sim' ? { borderStyle: 'dashed' } : undefined}
           >
             <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 6 }}>
               {fmtMonthYear(w.startDate)}~{fmtMonthYear(w.endDate)}
+              {w.source === 'sim' && <span style={{ color: '#a78bfa', marginLeft: 5 }}>합성</span>}
             </div>
             <div style={{ fontSize: 13, color: '#e2e8f0' }}>
               수익률 {fmtPct(returnPct)}&nbsp;&nbsp;IRR {w.stats.irr.toFixed(0)}%
@@ -484,6 +487,22 @@ function WindowGrid({ windows, selected, onSelect }) {
           </div>
         )
       })}
+    </div>
+  )
+}
+
+// 합성 창을 열었을 때의 경고. 이 화면의 숫자는 실제 체결 가능했던 값이 아니다.
+function SimNotice({ win }) {
+  return (
+    <div className="rules-panel" style={{ borderColor: '#7c3aed', marginTop: 16 }}>
+      <p style={{ color: '#c4b5fd', fontSize: 13, textAlign: 'left', margin: 0 }}>
+        <b>합성 데이터 구간입니다 ({fmtMonthYear(win.startDate)}~{fmtMonthYear(win.endDate)}).</b>{' '}
+        TQQQ는 2010-02 상장이라 이 기간에는 존재하지 않았습니다. QQQ 일간수익률을 3배로 키우고
+        차입비용(2 × 단기금리 + 스프레드)과 운용보수를 뺀 값이며, 스프레드는 2010년 이후 실제
+        TQQQ의 누적수익률에 맞춰 보정했습니다. 겹치는 기간에서 실제와 대조하면 기준선 총자산은
+        1~4%, 전략 개선폭은 0.0~0.2%p 차이로 재현됩니다. 그래도 <i>실제로 체결 가능했던 값은
+        아닙니다</i> — 국면이 어떤 모양이었는지 보는 용도로만 쓰세요.
+      </p>
     </div>
   )
 }
@@ -522,9 +541,12 @@ function CustomTooltip({ active, payload, label }) {
 }
 
 function BacktestDetail({ window: win, settings }) {
+  // 합성 창이면 합성 시계열로 다시 돌려야 한다. 안 그러면 카드의 숫자와
+  // 상세 화면의 숫자가 어긋난다(합성 창 기간엔 실제 데이터가 아예 없다).
+  const data = useMemo(() => dataForSource(win.source), [win.source])
   const { daily, trades, boostTrades, stats } = useMemo(
-    () => runFinalBacktest(win.startDate, win.endDate, settings),
-    [win.startDate, win.endDate, settings]
+    () => runFinalBacktest(win.startDate, win.endDate, settings, data),
+    [win.startDate, win.endDate, settings, data]
   )
 
   const sellDates = useMemo(() => new Set(trades.map(t => t.date)), [trades])
@@ -614,13 +636,14 @@ function BacktestDetail({ window: win, settings }) {
     return variants.map(v => {
       const { stats: vStats } = runFinalBacktest(win.startDate, win.endDate, {
         ...settings, enabled: v.enabled, relaxEnabled: v.relaxEnabled,
-      })
+      }, data)
       return { label: v.label, isCurrent: !!v.isCurrent, stats: vStats }
     })
-  }, [win.startDate, win.endDate, settings])
+  }, [win.startDate, win.endDate, settings, data])
 
   return (
     <section style={{ marginTop: 20 }}>
+      {win.source === 'sim' && <SimNotice win={win} />}
       <div className="stats-bar">
         <div className="stat-item">
           <span className="label">기간</span>
@@ -827,6 +850,8 @@ function App() {
   const dirty = JSON.stringify(draft) !== JSON.stringify(settings)
 
   const windows = useMemo(() => getRollingWindows(settings), [settings])
+  const realCount = windows.filter(w => w.source === 'real').length
+  const simCount = windows.length - realCount
   const [sel, setSel] = useState(null)
   const [view, setView] = useState('rolling')
 
@@ -857,7 +882,16 @@ function App() {
 
           {view === 'rolling' && (
             <>
-              <section className="section-title">5년 롤링 윈도우 (분기별)</section>
+              <section className="section-title">
+                5년 롤링 윈도우 (1년씩 슬라이드) — 실제 {realCount}개 + 합성 {simCount}개 = {windows.length}개
+              </section>
+              <p style={{ fontSize: 12, color: '#9ca3af', textAlign: 'left', margin: '-8px 0 12px' }}>
+                실제 TQQQ {DATA_START.slice(0, 7)}~{DATA_END.slice(0, 7)}에 5년 창을 1년씩 밀어 {realCount}개,
+                여기에 실제 데이터가 없는 {SIM_START.slice(0, 7)}~{DATA_START.slice(0, 7)} 구간을 합성 TQQQ로 {simCount}개 더했습니다(점선 카드).
+                합성 창 중 2010-02 이후 시작분은 실제 창과 같은 기간이라 뺐습니다.
+                {' '}<b>창 {windows.length}개가 검증 {windows.length}회는 아닙니다</b> — 이웃끼리 4년씩 겹치므로
+                실질 독립 표본은 전체 27.4년 ÷ 5년 = 약 5.5개입니다.
+              </p>
               <WindowGrid windows={windows} selected={sel} onSelect={setSel} />
               {sel && !isCustomWindow(sel) && <BacktestDetail window={sel} settings={settings} />}
             </>

@@ -1,4 +1,7 @@
 import tqqqRaw from '../data/tqqq.json' with { type: 'json' };
+// QQQ로 1999년까지 역산한 합성 TQQQ. 실제 TQQQ는 2010-02부터라 닷컴·금융위기가 없다.
+// 생성: python scripts/build-sim-tqqq.py (3배 곱이 아니라 차입비용까지 반영)
+import tqqqSimRaw from '../data/tqqq_sim.json' with { type: 'json' };
 
 // Wilder RSI(period), standard recursive smoothing (TradingView convention)
 function calcRSI(closes, period) {
@@ -61,8 +64,10 @@ function calcRollMax(closes, period) {
 }
 
 export const TQQQ_DATA = tqqqRaw;
+export const SIM_DATA = tqqqSimRaw;
 export const DATA_START = TQQQ_DATA[0][0];
 export const DATA_END = TQQQ_DATA[TQQQ_DATA.length - 1][0];
+export const SIM_START = SIM_DATA[0][0];
 
 // 전략 파라미터 기본값 (전부 UI에서 조정 가능)
 //  - 부스터: 60거래일 고점 대비 -25%↓ 시 주간 POOL 재투자 비율을 5%→25%로 상향
@@ -362,23 +367,44 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   return { daily, trades, boostTrades, stats };
 }
 
-// All 5-year windows (252*5 trading days), sliding by 63 days (one quarter)
-export function getRollingWindows(settings = DEFAULT_SETTINGS, data = TQQQ_DATA) {
-  const WINDOW = 252 * 5;
-  const SLIDE = 63;
+// 5년(252*5거래일) 창을 1년(252거래일)씩 밀며 만든다.
+//
+// 슬라이드를 분기(63일)에서 1년으로 늘렸다. 창을 잘게 썰수록 개수는 늘지만
+// 정보는 늘지 않는다 — 실질 독립 표본은 (전체기간 / 창길이)로 고정이고, 분기
+// 슬라이드는 이웃끼리 95%가 겹쳐서 46개를 독립 표본처럼 세면 신뢰구간이 실제보다
+// 2.6배 좁게 나온다(1년 슬라이드는 1.3배). 반대로 아예 안 겹치게 3등분하면
+// 자르는 위치에 결과가 휘둘린다 — 368가지 절단 위치를 전수로 돌려보면 평균
+// 개선폭이 +0.16%~+4.08%로 3.91%p 흔들렸다(1년 슬라이드는 2.49%p).
+// 1년 슬라이드가 그 둘 사이의 절충이다. 검증: scripts/window-design.mjs
+const WINDOW = 252 * 5;
+const SLIDE = 252;
+
+// 합성 창은 실제 데이터가 없는 기간만 쓴다. 시작일이 2010-02 이후인 합성 창은
+// 실제 창과 같은 기간을 다시 보여주는 것이라(개선폭 차이 0.0~0.2%p) 제외한다.
+// 카드 수만 늘고 정보는 안 늘면서 "그만큼 많이 검증했다"는 착시를 만든다.
+export function getRollingWindows(settings = DEFAULT_SETTINGS) {
   const result = [];
-  let id = 0;
-  for (let start = 0; start + WINDOW <= data.length; start += SLIDE) {
-    const startDate = data[start][0];
-    const endDate = data[start + WINDOW - 1][0];
-    try {
-      const { stats } = runFinalBacktest(startDate, endDate, settings, data);
-      result.push({ id: id++, startDate, endDate, stats });
-    } catch (_) {
-      // skip windows with insufficient data
+  const push = (data, source, filter) => {
+    for (let start = 0; start + WINDOW <= data.length; start += SLIDE) {
+      const startDate = data[start][0];
+      const endDate = data[start + WINDOW - 1][0];
+      if (filter && !filter(startDate)) continue;
+      try {
+        const { stats } = runFinalBacktest(startDate, endDate, settings, data);
+        result.push({ id: `${source}-${startDate}`, startDate, endDate, stats, source });
+      } catch (_) {
+        // skip windows with insufficient data
+      }
     }
-  }
+  };
+  push(TQQQ_DATA, 'real');
+  push(SIM_DATA, 'sim', d => d < DATA_START);
   return result;
+}
+
+// 창의 source에 맞는 시계열. 화면에서 상세 백테스트를 다시 돌릴 때 쓴다.
+export function dataForSource(source) {
+  return source === 'sim' ? SIM_DATA : TQQQ_DATA;
 }
 
 // 그날 RSI에 적용될 과열 스로틀 재투자 비율(%). 스로틀이 걸리지 않으면 null.
