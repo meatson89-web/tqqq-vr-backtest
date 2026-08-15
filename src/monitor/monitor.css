@@ -55,6 +55,21 @@
   border: 1px solid var(--mn-panel); cursor: grab;
 }
 
+/* 고정 지점 값 표시줄 — 커서를 떼도 남아 있다 */
+.mn-pinbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px;
+  padding: 9px 12px; margin: 0 0 12px;
+  background: rgba(232,163,61,.09); border: 1px solid rgba(232,163,61,.42);
+  border-radius: 7px;
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px;
+}
+.mn-pinbar .pd { color: var(--mn-accent); font-weight: 700; }
+.mn-pinbar .pv { color: var(--mn-ink); font-variant-numeric: tabular-nums; }
+.mn-pinbar .pv i { color: var(--mn-mute); font-style: normal; margin-right: 5px; }
+.mn-pinbar .pv b { font-weight: 700; }
+.mn-pinbar .sig { color: #d95926; font-weight: 700; }
+.mn-pinbar button { margin-left: auto; }
+
 .mn-note { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: var(--mn-mute); line-height: 1.55; margin: 10px 0 8px; }
 .mn-note b { color: #199e70; font-weight: 600; }
 .mn-src { font-size: 10.5px; color: var(--mn-mute); line-height: 1.6; border-top: 1px solid var(--mn-grid); margin-top: 12px; padding-top: 9px; }

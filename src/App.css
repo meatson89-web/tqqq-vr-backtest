@@ -257,7 +257,25 @@ header .sub {
   position: sticky; top: 20px; background: #16182a; border: 1px solid #2e303a;
   border-radius: 10px; padding: 14px;
 }
-.sidebar-title { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #6b7280; text-transform: uppercase; margin: 0 0 4px 4px; }
+.sidebar-title { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #6b7280; text-transform: uppercase; margin: 0 0 0 4px; }
+.sidebar-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 4px; }
+.sidebar-toggle {
+  font: inherit; font-size: 13px; line-height: 1; padding: 4px 8px; border-radius: 6px;
+  background: #1e2030; color: #9ca3af; border: 1px solid #2e303a; cursor: pointer; flex-shrink: 0;
+}
+.sidebar-toggle:hover { border-color: #4b5563; color: #e2e8f0; }
+.sidebar-toggle:focus-visible { outline: 2px solid #c084fc; outline-offset: 2px; }
+.sidebar-items { display: flex; flex-direction: column; gap: 6px; }
+.sidebar-current { display: none; }
+/* 접힌 상태: 폭만 줄이고 현재 메뉴를 세로로 표시 */
+.sidebar.collapsed { width: 46px; padding: 10px 6px; }
+.sidebar.collapsed .sidebar-head { justify-content: center; }
+.sidebar.collapsed .sidebar-items { display: none; }
+.sidebar.collapsed .sidebar-current {
+  display: block; writing-mode: vertical-rl; font-size: 11px; color: #c084fc;
+  font-weight: 700; letter-spacing: 0.06em; margin: 8px auto 2px;
+  white-space: nowrap; max-height: 220px; overflow: hidden;
+}
 .sidebar-item {
   text-align: left; font: inherit; font-size: 13px; padding: 11px 14px; border-radius: 8px;
   background: #1e2030; color: #9ca3af; border: 1px solid transparent; cursor: pointer;
@@ -270,6 +288,11 @@ header .sub {
   .layout { flex-direction: column; }
   .sidebar { width: 100%; flex-direction: row; flex-wrap: wrap; position: static; }
   .sidebar-title { display: none; }
+  /* 모바일에서는 이미 가로 배치라 접기가 의미 없다 — 항상 펼쳐 보여준다 */
+  .sidebar.collapsed { width: 100%; padding: 14px; }
+  .sidebar.collapsed .sidebar-items { display: flex; flex-direction: row; flex-wrap: wrap; }
+  .sidebar-items { flex-direction: row; flex-wrap: wrap; }
+  .sidebar-toggle, .sidebar.collapsed .sidebar-current { display: none; }
 }
 
 /* status boards (부스터/매도조건 상황판) */

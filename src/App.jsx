@@ -394,7 +394,7 @@ function CustomRangeForm({ onRun }) {
   )
 }
 
-function Sidebar({ view, onSelect }) {
+function Sidebar({ view, onSelect, collapsed, onToggle }) {
   const items = [
     { id: 'rolling', label: '5년 롤링 윈도우' },
     { id: 'custom', label: '직접 기간 설정' },
@@ -403,18 +403,33 @@ function Sidebar({ view, onSelect }) {
     { id: 'monitor', label: 'TQQQ 모니터링' },
     { id: 'info', label: '전략 설명 보기' },
   ]
+  const cur = items.find(it => it.id === view)
   return (
-    <nav className="sidebar">
-      <div className="sidebar-title">메뉴</div>
-      {items.map(it => (
+    <nav className={`sidebar${collapsed ? ' collapsed' : ''}`}>
+      <div className="sidebar-head">
+        {!collapsed && <span className="sidebar-title">메뉴</span>}
         <button
-          key={it.id}
-          className={`sidebar-item${view === it.id ? ' active' : ''}`}
-          onClick={() => onSelect(it.id)}
+          className="sidebar-toggle"
+          onClick={onToggle}
+          aria-expanded={!collapsed}
+          title={collapsed ? '메뉴 펼치기' : '메뉴 접기'}
         >
-          {it.label}
+          {collapsed ? '»' : '«'}
         </button>
-      ))}
+      </div>
+      {/* 항목은 항상 DOM에 두고 접힘은 CSS로 처리 — 모바일(가로배치)에서 메뉴가 사라지지 않도록 */}
+      <div className="sidebar-current" title={cur?.label}>{cur?.label ?? ''}</div>
+      <div className="sidebar-items">
+        {items.map(it => (
+          <button
+            key={it.id}
+            className={`sidebar-item${view === it.id ? ' active' : ''}`}
+            onClick={() => onSelect(it.id)}
+          >
+            {it.label}
+          </button>
+        ))}
+      </div>
     </nav>
   )
 }
@@ -977,6 +992,13 @@ function App() {
   const indepCount = windows.filter(w => w.independent).length
   const [sel, setSel] = useState(null)
   const [view, setView] = useState('rolling')
+  // 메뉴 접힘 상태는 새로고침해도 유지
+  const [navCollapsed, setNavCollapsed] = useState(
+    () => localStorage.getItem('navCollapsed') === '1')
+  const toggleNav = () => setNavCollapsed(v => {
+    localStorage.setItem('navCollapsed', v ? '0' : '1')
+    return !v
+  })
 
   const applySettings = () => setSettings(draft)
 
@@ -990,7 +1012,12 @@ function App() {
       <ParametersPanel draft={draft} onDraftChange={setDraft} onApply={applySettings} dirty={dirty} />
 
       <div className="layout">
-        <Sidebar view={view} onSelect={id => { setView(id); if (id !== 'custom') setSel(null) }} />
+        <Sidebar
+          view={view}
+          onSelect={id => { setView(id); if (id !== 'custom') setSel(null) }}
+          collapsed={navCollapsed}
+          onToggle={toggleNav}
+        />
         <div className="main-content">
           {view === 'info' && <StrategyInfo />}
           {view === 'boosterStatus' && <BoosterStatusPanel settings={settings} />}

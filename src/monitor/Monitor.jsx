@@ -140,6 +140,17 @@ export default function Monitor() {
   const pinLine = () => pin == null ? null
     : <ReferenceLine x={pin} stroke={INK} strokeWidth={1.4} ifOverflow="extendDomain" />
 
+  // 고정된 지점의 실제 행 — 선만 고정되고 값이 사라지지 않도록 별도 표시
+  const pinRow = useMemo(() => {
+    if (pin == null) return null
+    let best = null, bd = Infinity
+    for (const r of view) {
+      const g = Math.abs(r.t - pin)
+      if (g < bd) { bd = g; best = r }
+    }
+    return best
+  }, [pin, view])
+
   const TABS = [['cycle', '① 성장·낙폭'], ['disp', '② 가격·이격도·RSI'],
     ['regime', '③ 국면 분석'], ['outlook', '④ 장기전망']]
 
@@ -195,6 +206,26 @@ export default function Monitor() {
             onChange={e => setEnd(+e.target.value)} aria-label="기간 좌우 이동" />
           <button className="mn-tab sm" onClick={() => shift(span * 0.4)}>▶</button>
           <span className="ck">{xf(tStart)} ~ {xf(tEnd)}</span>
+        </div>
+      )}
+
+      {/* 고정된 지점의 값 — 마우스를 떼도 유지된다 */}
+      {(tab === 'cycle' || tab === 'disp') && pinRow && (
+        <div className="mn-pinbar">
+          <span className="pd">📌 {pinRow.ymd}</span>
+          <span className="pv"><i>TQQQ</i>${pinRow.px?.toFixed(2)}</span>
+          <span className="pv"><i>고점대비</i><b style={{ color: pinRow.dd <= -30 ? S3 : TXT }}>{pinRow.dd?.toFixed(1)}%</b></span>
+          <span className="pv"><i>이격도(MA{ma})</i>
+            <b style={{ color: pinRow.disp >= bands.up_disp ? S3 : pinRow.disp <= bands.dn_disp ? S2 : TXT }}>
+              {pinRow.disp?.toFixed(1)}%</b></span>
+          <span className="pv"><i>국면 예상고점</i>{pinRow.peakline?.toFixed(1)}%</span>
+          <span className="pv"><i>RSI(14)</i>
+            <b style={{ color: pinRow.rsi >= bands.up_rsi ? S3 : pinRow.rsi <= bands.dn_rsi ? S2 : TXT }}>
+              {pinRow.rsi?.toFixed(1)}</b></span>
+          <span className="pv"><i>성장지수</i>{pinRow.growth?.toLocaleString()}</span>
+          {pinRow.disp >= bands.up_disp && pinRow.rsi >= bands.up_rsi &&
+            <span className="pv sig">복합 과열신호 발동</span>}
+          <button className="mn-tab sm" onClick={() => setPin(null)}>해제</button>
         </div>
       )}
 
