@@ -472,7 +472,7 @@ export function getRollingWindows(settings = DEFAULT_SETTINGS) {
       try {
         const { stats } = runFinalBacktest(startDate, endDate, settings, data);
         result.push({ id: `${source}-${startDate}`, startDate, endDate, stats, source });
-      } catch (_) {
+      } catch {
         // skip windows with insufficient data
       }
     }
