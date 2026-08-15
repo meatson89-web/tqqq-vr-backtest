@@ -88,12 +88,12 @@ export function addIndicators(rows, ma = 200, rsiN = 14) {
 export function findCycles(rows, th = MDD_TH) {
   const v = rows.filter(r => r.px != null);
   const out = [];
-  let inx = false, pkIdx = 0, trIdx = 0, trVal = 0, startIdx = 0;
+  let inx = false, pkIdx = 0, trIdx = 0, trVal = 0;
   let runPeak = -Infinity, runPeakIdx = 0;
   for (let i = 0; i < v.length; i++) {
     const r = v[i];
     if (r.px > runPeak) { runPeak = r.px; runPeakIdx = i; }
-    if (!inx && r.dd < -0.001) { inx = true; startIdx = i; pkIdx = runPeakIdx; trVal = r.dd; trIdx = i; }
+    if (!inx && r.dd < -0.001) { inx = true; pkIdx = runPeakIdx; trVal = r.dd; trIdx = i; }
     else if (inx) {
       if (r.dd < trVal) { trVal = r.dd; trIdx = i; }
       if (r.dd > -0.001) {
@@ -139,6 +139,36 @@ export function regimeFit(rows, cycles) {
     now_pred_d: +(d.a + d.b * nowR).toFixed(1),
     now_pred_r: +(r.a + r.b * nowR).toFixed(1),
   };
+}
+
+/**
+ * 사이클 고점/저점 마커를 본 데이터 행에 직접 붙인다.
+ * Scatter에 별도 data 배열을 주면 recharts가 툴팁 활성 인덱스를 본 데이터와
+ * 매칭하지 못해 날짜·값이 엉뚱하게 나온다. 그래서 하나의 배열만 쓴다.
+ */
+export function addCycleMarkers(rows, cycles) {
+  for (const r of rows) {
+    r.mkPeakPx = r.mkTrPx = null;
+    r.mkPeakGrowth = r.mkTrGrowth = null;
+    r.mkPeakDisp = r.mkTrDisp = null;
+    r.mkPeakRsi = r.mkTrRsi = null;
+    r.cycDeep = null;
+  }
+  const idx = new Map(rows.map((r, i) => [r.ymd, i]));
+  for (const c of cycles) {
+    const mark = (ymd, kind) => {
+      const i = idx.get(ymd);
+      if (i == null) return;
+      const r = rows[i];
+      const p = kind === 'peak' ? 'mkPeak' : 'mkTr';
+      r[p + 'Px'] = r.px; r[p + 'Growth'] = r.growth;
+      r[p + 'Disp'] = r.disp; r[p + 'Rsi'] = r.rsi;
+      r.cycDeep = c.deep;
+    };
+    mark(c.pk.ymd, 'peak');
+    mark(c.tr.ymd, 'trough');
+  }
+  return rows;
 }
 
 /** 국면 예상 고점선을 각 행에 붙인다 */
@@ -196,7 +226,7 @@ export function annualStats(rows) {
 }
 
 /** 현재 상태 요약 */
-export function nowStats(rows, cycles) {
+export function nowStats(rows) {
   const v = rows.filter(r => r.px != null);
   const last = v[v.length - 1], first = v[0];
   const years = (new Date(last.ymd) - new Date(first.ymd)) / 86400000 / 365.25;

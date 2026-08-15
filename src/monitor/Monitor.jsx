@@ -40,8 +40,9 @@ function useMonitor(ma, rsiN) {
     const cycles = M.findCycles(rows)
     const fit = M.regimeFit(rows, cycles)
     M.addPeakLines(rows, fit)
+    M.addCycleMarkers(rows, cycles)
     const bands = M.bandStats(cycles)
-    const now = M.nowStats(rows, cycles)
+    const now = M.nowStats(rows)
     const annual = M.annualStats(rows)
     const sim = M.simulate3x(rows)
     const px = rows.filter(r => r.px != null).map(r => r.px)
@@ -61,22 +62,39 @@ const Tile = ({ label, value, unit, tone, sub }) => (
   </div>
 )
 
-function TipBox({ active, payload, label, rows, title }) {
+/**
+ * rows = { dataKey: 포맷함수 }. 여기 정의된 키만 보여준다.
+ * (마커용 Scatter 계열이 툴팁에 섞여 들어오는 것을 막는다)
+ */
+function TipBox({ active, payload, rows }) {
   if (!active || !payload?.length) return null
+  const p0 = payload.find(p => p.payload?.ymd)?.payload
+  const seen = new Set()
+  const items = payload.filter(p => {
+    if (!rows?.[p.dataKey] || p.value == null || seen.has(p.dataKey)) return false
+    seen.add(p.dataKey); return true
+  })
+  if (!p0) return null
   return (
     <div className="mn-tip">
-      <div className="t">{title ? title(payload[0].payload) : label}</div>
-      {payload.filter(p => p.value != null).map((p, i) => (
+      <div className="t">{p0.ymd}</div>
+      {items.map((p, i) => (
         <div className="r" key={i}>
           <span>{p.name}</span>
-          <span style={{ color: p.color }}>{rows?.[p.dataKey]?.(p.value) ?? p.value}</span>
+          <span style={{ color: p.color }}>{rows[p.dataKey](p.value)}</span>
         </div>
       ))}
     </div>
   )
 }
 
-const fmtYmd = d => d?.ymd ?? ''
+// 사이클 마커 — 깊은 낙폭은 큰 점
+const dot = (color) => (props) => {
+  const { cx, cy, payload } = props
+  if (cx == null || cy == null) return null
+  return <circle cx={cx} cy={cy} r={payload?.cycDeep ? 5.5 : 3.5} fill={color} stroke="#12181a" strokeWidth={1.5} />
+}
+const PEAK_DOT = dot(S3), TR_DOT = dot(S2)
 const xTickFmt = (span) => (v) => {
   const y = Math.floor(v + 1e-6), m = Math.min(12, Math.max(1, Math.round((v - y) * 12) + 1))
   return span > 2.5 ? `'${String(y).slice(2)}` : `${String(y).slice(2)}.${m}`
@@ -112,15 +130,15 @@ export default function Monitor() {
 
   const XA = { dataKey: 't', type: 'number', domain: [tStart, tEnd], ticks, tickFormatter: xf,
     tick: { fill: MUTE, fontSize: 10.5 }, axisLine: { stroke: '#1f2b2e' }, tickLine: false, allowDataOverflow: true }
-  const onClickChart = e => setPin(p => (e?.activeLabel != null && p === e.activeLabel) ? null : e?.activeLabel ?? p)
-  const PinLine = () => pin == null ? null : <ReferenceLine x={pin} stroke={INK} strokeWidth={1.4} />
-
-  const cycDots = key => cycles
-    .filter(c => c.pk.t >= tStart && c.pk.t <= tEnd)
-    .flatMap(c => [
-      { t: c.pk.t, v: c.pk[key], kind: 'peak', deep: c.deep },
-      { t: c.tr.t, v: c.tr[key], kind: 'trough', deep: c.deep },
-    ]).filter(d => d.v != null && d.t >= tStart && d.t <= tEnd)
+  // recharts는 차트 위 mousemove가 선행돼야 activeLabel을 채운다.
+  // 값을 못 잡은 클릭은 무시해야 고정이 엉뚱하게 유지되지 않는다.
+  const onClickChart = e => {
+    const x = e?.activeLabel
+    if (typeof x !== 'number') return
+    setPin(p => (p != null && Math.abs(p - x) < 1e-9) ? null : x)
+  }
+  const pinLine = () => pin == null ? null
+    : <ReferenceLine x={pin} stroke={INK} strokeWidth={1.4} ifOverflow="extendDomain" />
 
   const TABS = [['cycle', '① 성장·낙폭'], ['disp', '② 가격·이격도·RSI'],
     ['regime', '③ 국면 분석'], ['outlook', '④ 장기전망']]
@@ -190,12 +208,11 @@ export default function Monitor() {
               <XAxis {...XA} />
               <YAxis scale="log" domain={['auto', 'auto']} width={64} tick={{ fill: MUTE, fontSize: 10 }}
                 axisLine={false} tickLine={false} tickFormatter={v => Math.round(v).toLocaleString()} />
-              <Tooltip content={<TipBox title={fmtYmd} rows={{ growth: v => Math.round(v).toLocaleString(), dd: v => v + '%' }} />} />
+              <Tooltip content={<TipBox rows={{ growth: v => Math.round(v).toLocaleString(), dd: v => v + '%' }} />} />
               <Line type="monotone" dataKey="growth" name="성장지수" stroke={S1} strokeWidth={1.8} dot={false} isAnimationActive={false} />
-              <Scatter data={cycDots('growth')} dataKey="v" isAnimationActive={false}>
-                {cycDots('growth').map((d, i) => <Cell key={i} fill={d.kind === 'peak' ? S3 : S2} r={d.deep ? 5.5 : 3.5} />)}
-              </Scatter>
-              <PinLine />
+              <Scatter dataKey="mkPeakGrowth" shape={PEAK_DOT} isAnimationActive={false} legendType="none" />
+              <Scatter dataKey="mkTrGrowth" shape={TR_DOT} isAnimationActive={false} legendType="none" />
+              {pinLine()}
             </ComposedChart>
           </ResponsiveContainer>
           <ResponsiveContainer width="100%" height={190}>
@@ -205,9 +222,9 @@ export default function Monitor() {
               <YAxis domain={[-90, 0]} ticks={[0, -20, -40, -60, -80]} width={64}
                 tickFormatter={v => v + '%'} tick={{ fill: MUTE, fontSize: 10 }} axisLine={false} tickLine={false} />
               <ReferenceLine y={-40} stroke={S3} strokeOpacity={0.45} />
-              <Tooltip content={<TipBox title={fmtYmd} rows={{ dd: v => v + '%' }} />} />
+              <Tooltip content={<TipBox rows={{ dd: v => v + '%' }} />} />
               <Area type="monotone" dataKey="dd" name="고점대비 낙폭" stroke={S3} strokeWidth={1.4} fill={S3} fillOpacity={0.22} dot={false} isAnimationActive={false} />
-              <PinLine />
+              {pinLine()}
             </ComposedChart>
           </ResponsiveContainer>
           <p className="mn-note">{bands.mdd_th}% 이상 하락 사이클 {bands.n}회 — 그중 {bands.deep_th}% 이상 깊은 낙폭 {bands.n_deep}회</p>
@@ -242,12 +259,11 @@ export default function Monitor() {
               <XAxis {...XA} />
               <YAxis scale="log" domain={['auto', 'auto']} width={64} tick={{ fill: MUTE, fontSize: 10 }}
                 axisLine={false} tickLine={false} tickFormatter={v => '$' + (v >= 10 ? v.toFixed(0) : v.toFixed(2))} />
-              <Tooltip content={<TipBox title={fmtYmd} rows={{ px: v => '$' + v.toFixed(2) }} />} />
+              <Tooltip content={<TipBox rows={{ px: v => '$' + v.toFixed(2) }} />} />
               <Line type="monotone" dataKey="px" name="TQQQ 종가" stroke={S2} strokeWidth={1.5} dot={false} isAnimationActive={false} />
-              <Scatter data={cycDots('px')} dataKey="v" isAnimationActive={false}>
-                {cycDots('px').map((d, i) => <Cell key={i} fill={d.kind === 'peak' ? S3 : S2} r={d.deep ? 5.5 : 3.5} />)}
-              </Scatter>
-              <PinLine />
+              <Scatter dataKey="mkPeakPx" shape={PEAK_DOT} isAnimationActive={false} legendType="none" />
+              <Scatter dataKey="mkTrPx" shape={TR_DOT} isAnimationActive={false} legendType="none" />
+              {pinLine()}
             </ComposedChart>
           </ResponsiveContainer>
           <p className="mn-note">QQQ <b>{ma}일</b> 이동평균 대비 이격도. 점선은 <b style={{ color: S4 }}>국면 조정 예상 고점선</b>(직전 6개월 상승률 기준).</p>
@@ -261,13 +277,12 @@ export default function Monitor() {
                 tick={{ fill: MUTE, fontSize: 10 }} axisLine={false} tickLine={false} />
               <ReferenceLine y={100} stroke={MUTE} strokeOpacity={0.5} />
               <ReferenceLine y={bands.up_disp} stroke={S3} strokeOpacity={0.55} />
-              <Tooltip content={<TipBox title={fmtYmd} rows={{ disp: v => v.toFixed(1) + '%', peakline: v => v.toFixed(1) + '%' }} />} />
+              <Tooltip content={<TipBox rows={{ disp: v => v.toFixed(1) + '%', peakline: v => v.toFixed(1) + '%' }} />} />
               <Line type="monotone" dataKey="disp" name={`이격도(MA${ma})`} stroke={S1} strokeWidth={1.5} dot={false} isAnimationActive={false} />
               <Line type="monotone" dataKey="peakline" name="국면 예상 고점" stroke={S4} strokeWidth={1.2} strokeDasharray="4 3" dot={false} isAnimationActive={false} />
-              <Scatter data={cycDots('disp')} dataKey="v" isAnimationActive={false}>
-                {cycDots('disp').map((d, i) => <Cell key={i} fill={d.kind === 'peak' ? S3 : S2} r={d.deep ? 5.5 : 3.5} />)}
-              </Scatter>
-              <PinLine />
+              <Scatter dataKey="mkPeakDisp" shape={PEAK_DOT} isAnimationActive={false} legendType="none" />
+              <Scatter dataKey="mkTrDisp" shape={TR_DOT} isAnimationActive={false} legendType="none" />
+              {pinLine()}
             </ComposedChart>
           </ResponsiveContainer>
           <p className="mn-note">TQQQ RSI(14) — 과열 <b style={{ color: S3 }}>{bands.up_rsi}↑</b> / 과매도 <b style={{ color: S2 }}>{bands.dn_rsi}↓</b></p>
@@ -280,13 +295,12 @@ export default function Monitor() {
               <YAxis domain={[0, 100]} ticks={[0, bands.dn_rsi, 50, bands.up_rsi, 100]} width={64}
                 tick={{ fill: MUTE, fontSize: 10 }} axisLine={false} tickLine={false} />
               <ReferenceLine y={50} stroke={MUTE} strokeOpacity={0.4} />
-              <Tooltip content={<TipBox title={fmtYmd} rows={{ rsi: v => v.toFixed(1), peakline_r: v => v.toFixed(1) }} />} />
+              <Tooltip content={<TipBox rows={{ rsi: v => v.toFixed(1), peakline_r: v => v.toFixed(1) }} />} />
               <Line type="monotone" dataKey="rsi" name="RSI(14)" stroke={S4} strokeWidth={1.4} dot={false} isAnimationActive={false} />
               <Line type="monotone" dataKey="peakline_r" name="국면 예상 고점" stroke={S1} strokeWidth={1.1} strokeDasharray="4 3" dot={false} isAnimationActive={false} />
-              <Scatter data={cycDots('rsi')} dataKey="v" isAnimationActive={false}>
-                {cycDots('rsi').map((d, i) => <Cell key={i} fill={d.kind === 'peak' ? S3 : S2} r={d.deep ? 5.5 : 3.5} />)}
-              </Scatter>
-              <PinLine />
+              <Scatter dataKey="mkPeakRsi" shape={PEAK_DOT} isAnimationActive={false} legendType="none" />
+              <Scatter dataKey="mkTrRsi" shape={TR_DOT} isAnimationActive={false} legendType="none" />
+              {pinLine()}
             </ComposedChart>
           </ResponsiveContainer>
         </>
@@ -414,7 +428,7 @@ export default function Monitor() {
               <YAxis scale="log" domain={[0.1, 3000]} ticks={[1, 10, 100, 1000]} width={56}
                 tick={{ fill: MUTE, fontSize: 10 }} axisLine={false} tickLine={false} />
               <ReferenceLine y={100} stroke={MUTE} strokeOpacity={0.4} />
-              <Tooltip content={<TipBox title={fmtYmd} rows={{
+              <Tooltip content={<TipBox rows={{
                 sim: v => v < 10 ? v.toFixed(2) : Math.round(v).toLocaleString(),
                 q1: v => Math.round(v).toLocaleString() }} />} />
               <Line type="monotone" dataKey="q1" name="QQQ (1배)" stroke={S2} strokeWidth={1.6} dot={false} isAnimationActive={false} />
