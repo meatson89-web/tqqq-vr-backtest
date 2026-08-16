@@ -104,6 +104,8 @@ export const DEFAULT_SETTINGS = {
   //   3) 지표: 이격도 >= 국면 예상 고점선 AND RSI >= 국면 예상 고점선 (+margin)
   anticipateEnabled: false,
   anticipateRegimeMax: 40, anticipateCashMax: 20, anticipateMargin: 0,
+  // 발동조건1을 재는 방식과 기간. 'ret' | 'maslope' | 'highdist'
+  anticipateRegimeMode: 'ret', anticipateRegimeN: 126,
   // 예상 고점선 하한. 국면이 나쁘면 회귀가 "이동평균선 아래에서 고점" 같은 값을
   // 내놓아 아무 반등에나 걸린다(실측: 이격도 +5.4%에서 매도). 고점이라 부를 최소선.
   anticipateDispFloor: 0, anticipateRsiFloor: 0,
@@ -182,8 +184,40 @@ function getIndicators(data) {
 //   고점은 -30%를 맞기 전에는 사이클인지 알 수조차 없다.
 const REGIME_N = 126;
 
-function calcRegimeArr(closes) {
-  return closes.map((c, i) => (i < REGIME_N ? NaN : (c / closes[i - REGIME_N] - 1) * 100));
+function calcRegimeArr(closes, n = REGIME_N) {
+  return closes.map((c, i) => (i < n ? NaN : (c / closes[i - n] - 1) * 100));
+}
+
+/**
+ * 발동조건1("횡보·저성장")을 재는 방식. 무엇이 국면을 가장 잘 가르는지는
+ * 실측으로 정할 문제라 세 가지를 두고 고를 수 있게 했다.
+ *   ret      직전 n거래일 수익률 %            — 단순하지만 점대점이라 노이즈가 있다
+ *   maslope  180일선 자신의 n거래일 기울기 %   — 추세만 남기고 일간 노이즈를 지운다
+ *   highdist 직전 n거래일 고점 대비 위치 %     — 신고가 행진이면 0, 눌리면 음수
+ * 셋 다 "값이 낮을수록 횡보·약세"라서 게이트는 항상 <= 로 건다.
+ */
+function calcRegimeGate(closes, mode, n) {
+  if (mode === 'maslope') {
+    const ma = new Array(closes.length).fill(NaN);
+    let sum = 0;
+    for (let i = 0; i < closes.length; i++) {
+      sum += closes[i];
+      if (i >= 180) sum -= closes[i - 180];
+      if (i >= 179) ma[i] = sum / 180;
+    }
+    return ma.map((v, i) => (i < 179 + n || isNaN(ma[i - n]) ? NaN : (v / ma[i - n] - 1) * 100));
+  }
+  if (mode === 'highdist') {
+    const out = new Array(closes.length).fill(NaN);
+    for (let i = 0; i < closes.length; i++) {
+      if (i < n) continue;
+      let m = -Infinity;
+      for (let j = i - n; j <= i; j++) if (closes[j] > m) m = closes[j];
+      out[i] = (closes[i] / m - 1) * 100;
+    }
+    return out;
+  }
+  return calcRegimeArr(closes, n);   // 'ret'
 }
 
 /** 하락 th%·반등 rebound%로 방향을 트는 지그재그. 회복을 요구하지 않는다 —
@@ -213,6 +247,13 @@ function fitLine(pts) {
 }
 
 /** 인덱스별 워크포워드 예상 고점 이격도·RSI. 확정 사이클이 minCycles 미만이면 NaN. */
+function getRegimeGateArr(data, mode, n) {
+  const ind = getIndicators(data);
+  const key = `gate:${mode}:${n}`;
+  if (!ind.regime[key]) ind.regime[key] = calcRegimeGate(ind.closes, mode, n);
+  return ind.regime[key];
+}
+
 function getRegimeLines(data, minCycles) {
   const ind = getIndicators(data);
   const key = 'wf' + minCycles;
@@ -346,7 +387,10 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   const antMinCycles = booster.anticipateMinCycles ?? DEFAULT_SETTINGS.anticipateMinCycles;
   const antDispFloor = booster.anticipateDispFloor ?? DEFAULT_SETTINGS.anticipateDispFloor;
   const antRsiFloor = booster.anticipateRsiFloor ?? DEFAULT_SETTINGS.anticipateRsiFloor;
+  const antRegimeMode = booster.anticipateRegimeMode ?? DEFAULT_SETTINGS.anticipateRegimeMode;
+  const antRegimeN = booster.anticipateRegimeN ?? DEFAULT_SETTINGS.anticipateRegimeN;
   const antLines = antEnabled ? getRegimeLines(data, antMinCycles) : null;
+  const antGate = antEnabled ? getRegimeGateArr(data, antRegimeMode, antRegimeN) : null;
 
   const throttleTiers = booster.throttleEnabled
     ? [...(booster.throttleTiers ?? DEFAULT_SETTINGS.throttleTiers)].sort((a, b) => a[0] - b[0])
@@ -433,7 +477,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
         const pd = Math.max(antLines.predD[i], antDispFloor);
         const pr = Math.max(antLines.predR[i], antRsiFloor);
         if (
-          !isNaN(antLines.reg[i]) && antLines.reg[i] <= antRegimeMax &&
+          !isNaN(antGate[i]) && antGate[i] <= antRegimeMax &&
           cashPct <= antCashMax &&
           !isNaN(pd) && !isNaN(pr) &&
           !isNaN(disp) && disp >= pd + antMargin &&
@@ -449,7 +493,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
           sellNo++;
           lastSellIdx = i;
           antTrades.push({ date, priceUSD, returnPct: ret * 100, rsi, disp, predD: pd, predR: pr,
-            regime: antLines.reg[i], cashPct, soldKRW: sellValue, poolAfter: pool });
+            regime: antLines.reg[i], gate: antGate[i], cashPct, soldKRW: sellValue, poolAfter: pool });
         }
       }
 
