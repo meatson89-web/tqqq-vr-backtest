@@ -4,7 +4,13 @@
 
 export const MDD_TH = -30;   // 사이클로 셀 최소 낙폭(%)
 export const DEEP_TH = -40;  // 이보다 깊으면 '깊은 낙폭'
-export const UP_DISP = 115;  // 과열 이격도 기준선
+// 과열 이격도 기준선. 200일선 시절의 115를 180일선으로 옮긴 값 —
+// scripts/calibrate-overheat.mjs 로 재보정했고 근거 세 가지가 모두 114로 모인다.
+//   1) QQQ180≥114 는 옛 QQQ200≥115 와 성능이 같다 (고점 7/13·체류 3.5%·효율 15.4)
+//   2) 전략 매도선(TQQQ 180일 이격도 +40%)에 걸린 날의 QQQ180 이격도 중앙값 114.1
+//   3) 사이클 고점 13개의 QQQ180 이격도 중앙값 114.7
+// 115를 그대로 두면 같은 조합의 고점 포착이 7/13 → 5/13으로 떨어진다.
+export const UP_DISP = 114;
 export const UP_RSI = 70;    // 과열 RSI
 export const DN_DISP = 90;   // 깊은 저점 이격도
 export const DN_RSI = 33;    // 과매도 RSI

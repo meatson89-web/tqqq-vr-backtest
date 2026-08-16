@@ -18,14 +18,16 @@ const MAS = [20, 50, 60, 100, 180]
 // 지표·통계는 항상 일봉 전체로 계산한다.
 const MAX_PTS = 900
 
-// 신호 성능 (별도 실측 스크립트 결과 — 표본 13개)
+// 신호 성능 — scripts/calibrate-overheat.mjs 실측 (표본 = 사이클 고점 13개).
+// 포착 = 고점 직전 21거래일 안에 신호가 켜졌는가, 체류 = 전체 거래일 중 켜진 비율.
+// 180일선·과열선 114로 재계산한 값이다.
 const SIGPERF = [
-  ['고정: 이격도≥115 AND RSI≥70', 54, 3.4, 15.9, true],
-  ['혼합: 이격도 국면선 AND RSI≥70', 46, 4.6, 9.9, false],
-  ['적응형 AND (margin 0)', 38, 4.3, 8.9, false],
-  ['RSI ≥70 단독', 77, 12.5, 6.1, false],
-  ['이격도 ≥115% 단독', 62, 10.7, 5.7, false],
-  ['고정: 이격도≥115 OR RSI≥70', 85, 19.9, 4.3, false],
+  ['고정: 이격도≥114 AND RSI≥70', 53.8, 3.5, 15.4, true],
+  ['혼합: 이격도 국면선 AND RSI≥70', 53.8, 5.6, 9.6, false],
+  ['RSI ≥70 단독', 84.6, 12.5, 6.8, false],
+  ['이격도 ≥114% 단독', 61.5, 10.8, 5.7, false],
+  ['고정: 이격도≥114 OR RSI≥70', 92.3, 19.8, 4.7, false],
+  ['적응형 AND (margin 0)', 69.2, 15, 4.6, false],
 ]
 // 낙폭 사전경보 성능 (warning.py 실측)
 const WARNPERF = [
@@ -202,7 +204,7 @@ export default function Monitor() {
           sub={`역대 최악 ${now.mdd_all}% (2022.12)`} />
         <Tile label={`QQQ vs ${ma}일선 이격도`} value={now.disp} unit="%"
           tone={now.disp >= bands.up_disp ? S3 : now.disp <= bands.dn_disp ? S2 : TXT}
-          sub={`과열선 ${bands.up_disp}% · 실측 고점 중앙 ${bands.peak_disp.med}%`} />
+          sub={`과열선 ${bands.up_disp}%${ma === 180 ? ' (전략 매도선 TQQQ +40% 상당)' : ''} · 실측 고점 중앙 ${bands.peak_disp.med}%`} />
         <Tile label="TQQQ RSI(14)" value={now.rsi}
           tone={now.rsi >= bands.up_rsi ? S3 : now.rsi <= bands.dn_rsi ? S2 : TXT}
           sub={`실측 고점 중앙 ${bands.peak_rsi.med} / 저점 ${bands.trough_rsi.med}`} />
@@ -434,7 +436,9 @@ export default function Monitor() {
             </p>
           </div>
 
-          <p className="mn-note" style={{ marginTop: 16 }}><b>신호 성능 비교</b> — 효율 = 고점 포착률 ÷ 밴드 체류시간. 적응형은 선이 시장을 따라 올라가 트리거로는 고정선보다 나빴습니다.</p>
+          <p className="mn-note" style={{ marginTop: 16 }}><b>신호 성능 비교</b> — 효율 = 고점 포착률 ÷ 밴드 체류시간.
+            포착은 고점 직전 <b>21거래일</b> 안에 신호가 켜졌는지로 셉니다(7~40일 어디로 잡아도 결과는 같습니다).
+            적응형은 선이 시장을 따라 올라가 트리거로는 고정선보다 나빴습니다.</p>
           <div className="mn-tw">
             <table>
               <thead><tr><th>신호</th><th>고점 포착</th><th>밴드 체류</th><th>효율</th></tr></thead>
@@ -550,6 +554,11 @@ export default function Monitor() {
       <p className="mn-src" style={{ marginTop: 14 }}>
         <b>데이터</b> Yahoo Finance TQQQ·QQQ 분할·배당 조정 종가. 낙폭·사이클·이격도·RSI·회귀식까지 <b>화면에서 직접 계산</b>하므로,
         데이터가 갱신되면 모든 수치가 자동으로 따라 움직입니다. 검증: 최대낙폭 -81.7%, 2022년 -79.1%, 2018년 -19.8% — 모두 공표치와 일치.
+        {' '}<b>이격도 표기 주의</b> — 이 화면의 이격도는 <b>QQQ</b>가 자기 이동평균선에서 떨어진 정도(100 = 선 위)이고,
+        매도 전략의 이격도는 <b>TQQQ</b>가 자기 180일선에서 떨어진 정도(+40% 초과 시 매도)라 <b>서로 다른 값</b>입니다.
+        과열선 {bands.up_disp}는 그 매도선에 해당하는 QQQ 쪽 수치입니다 — TQQQ가 180일선 +40%에 닿은 날들의
+        QQQ 이격도 중앙값이 114.1이고, 200일선 시절 115와 성능도 같습니다(고점 7/13·체류 3.5%).
+        재계산: <code>scripts/calibrate-overheat.mjs</code>.
       </p>
     </div>
   )
