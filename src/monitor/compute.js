@@ -74,7 +74,7 @@ export function addDrawdown(rows) {
 }
 
 /** 이격도·RSI (MA 기간 가변) */
-export function addIndicators(rows, ma = 200, rsiN = 14) {
+export function addIndicators(rows, ma = 180, rsiN = 14) {
   const m = sma(rows.map(r => r.q), ma);
   const rs = wilderRsi(rows.map(r => r.px), rsiN);
   rows.forEach((r, i) => {
@@ -142,33 +142,24 @@ export function regimeFit(rows, cycles) {
 }
 
 /**
- * 사이클 고점/저점 마커를 본 데이터 행에 직접 붙인다.
- * Scatter에 별도 data 배열을 주면 recharts가 툴팁 활성 인덱스를 본 데이터와
- * 매칭하지 못해 날짜·값이 엉뚱하게 나온다. 그래서 하나의 배열만 쓴다.
+ * 사이클 고점/저점 마커를 짧은 배열로 뽑는다.
+ * 예전에는 본 데이터 행마다 마커 필드를 붙이고 Scatter로 그렸는데,
+ * Scatter는 값이 null인 행까지 전부 레이어를 만들기 때문에 점 26개를 찍자고
+ * 행 수(4천여)×계열 수만큼 빈 노드가 생겨 차트가 심하게 버벅였다.
+ * 마커는 ReferenceDot으로 따로 그린다 — 툴팁 활성 인덱스에도 끼어들지 않는다.
+ * disp·rsi는 addIndicators 뒤에 호출해야 현재 MA 기준 값이 들어간다.
  */
-export function addCycleMarkers(rows, cycles) {
-  for (const r of rows) {
-    r.mkPeakPx = r.mkTrPx = null;
-    r.mkPeakGrowth = r.mkTrGrowth = null;
-    r.mkPeakDisp = r.mkTrDisp = null;
-    r.mkPeakRsi = r.mkTrRsi = null;
-    r.cycDeep = null;
-  }
-  const idx = new Map(rows.map((r, i) => [r.ymd, i]));
+export function cycleMarks(cycles) {
+  const out = [];
   for (const c of cycles) {
-    const mark = (ymd, kind) => {
-      const i = idx.get(ymd);
-      if (i == null) return;
-      const r = rows[i];
-      const p = kind === 'peak' ? 'mkPeak' : 'mkTr';
-      r[p + 'Px'] = r.px; r[p + 'Growth'] = r.growth;
-      r[p + 'Disp'] = r.disp; r[p + 'Rsi'] = r.rsi;
-      r.cycDeep = c.deep;
-    };
-    mark(c.pk.ymd, 'peak');
-    mark(c.tr.ymd, 'trough');
+    for (const [kind, r] of [['peak', c.pk], ['trough', c.tr]]) {
+      out.push({
+        kind, deep: c.deep, t: r.t, ymd: r.ymd,
+        px: r.px, growth: r.growth, disp: r.disp, rsi: r.rsi,
+      });
+    }
   }
-  return rows;
+  return out;
 }
 
 /** 국면 예상 고점선을 각 행에 붙인다 */

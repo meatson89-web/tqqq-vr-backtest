@@ -1,7 +1,7 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import {
   ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine, ReferenceArea, Scatter, Cell, Legend,
+  ResponsiveContainer, ReferenceLine, ReferenceArea, ReferenceDot, Scatter, Cell, Legend,
 } from 'recharts'
 import tqqqRaw from '../data/tqqq.json'
 import qqqRaw from '../data/qqq.json'
@@ -13,7 +13,10 @@ const S1 = '#c98500', S2 = '#199e70', S3 = '#d95926', S4 = '#9085e9'
 const INK = '#e8a33d', GRID = '#1c2528', MUTE = '#7c9490', TXT = '#dfe8e6'
 
 const RANGES = [['all', '전체'], [10, '10년'], [5, '5년'], [3, '3년'], [1, '1년'], [0.5, '6개월']]
-const MAS = [20, 50, 60, 100, 200]
+const MAS = [20, 50, 60, 100, 180]
+// 화면 폭보다 점이 많아 봐야 보이지 않는다. 그리는 점만 솎아내고
+// 지표·통계는 항상 일봉 전체로 계산한다.
+const MAX_PTS = 900
 
 // 신호 성능 (별도 실측 스크립트 결과 — 표본 13개)
 const SIGPERF = [
@@ -32,6 +35,9 @@ const WARNPERF = [
   ['고점대비 -10% 도달', '13/13', '139일', '-12.5%', '32%'],
 ]
 
+// 파이프라인 전체가 13ms라 MA를 바꿀 때 통째로 다시 돌려도 문제없다.
+// 행 객체를 재활용해 제자리에서 고치면 안 된다 — recharts가 차트에 넘긴
+// 데이터를 내부 스토어에서 동결(dev)하기 때문에 두 번째 계산에서 터진다.
 function useMonitor(ma, rsiN) {
   return useMemo(() => {
     const rows = M.buildSeries(tqqqRaw, qqqRaw)
@@ -40,7 +46,7 @@ function useMonitor(ma, rsiN) {
     const cycles = M.findCycles(rows)
     const fit = M.regimeFit(rows, cycles)
     M.addPeakLines(rows, fit)
-    M.addCycleMarkers(rows, cycles)
+    const marks = M.cycleMarks(cycles)
     const bands = M.bandStats(cycles)
     const now = M.nowStats(rows)
     const annual = M.annualStats(rows)
@@ -50,7 +56,7 @@ function useMonitor(ma, rsiN) {
       act: [M.rollingStats(px, 5), M.rollingStats(px, 10)],
       sim: [M.rollingStats(sim.series.map(s => s.sim), 5), M.rollingStats(sim.series.map(s => s.sim), 10)],
     }
-    return { rows, cycles, fit, bands, now, annual, sim, rolls }
+    return { rows, cycles, marks, fit, bands, now, annual, sim, rolls }
   }, [ma, rsiN])
 }
 
@@ -88,26 +94,38 @@ function TipBox({ active, payload, rows }) {
   )
 }
 
-// 사이클 마커 — 깊은 낙폭은 큰 점
-const dot = (color) => (props) => {
-  const { cx, cy, payload } = props
-  if (cx == null || cy == null) return null
-  return <circle cx={cx} cy={cy} r={payload?.cycDeep ? 5.5 : 3.5} fill={color} stroke="#12181a" strokeWidth={1.5} />
-}
-const PEAK_DOT = dot(S3), TR_DOT = dot(S2)
+// 사이클 마커 — 26개뿐이라 ReferenceDot으로 직접 찍는다(깊은 낙폭은 큰 점).
+// 화면 밖 점은 recharts가 알아서 버린다(ifOverflow 기본 discard).
+const marksFor = (marks, key) => marks.map((m, i) => (
+  m[key] == null ? null : (
+    <ReferenceDot key={key + i} x={m.t} y={m[key]} r={m.deep ? 5.5 : 3.5}
+      fill={m.kind === 'peak' ? S3 : S2} stroke="#12181a" strokeWidth={1.5} />
+  )
+))
+
+// 툴팁 element를 렌더마다 새로 만들면 recharts가 매번 다시 그린다. 모듈 고정.
+const TIP_GROWTH = <TipBox rows={{ growth: v => Math.round(v).toLocaleString(), dd: v => v + '%' }} />
+const TIP_DD = <TipBox rows={{ dd: v => v + '%' }} />
+const TIP_PX = <TipBox rows={{ px: v => '$' + v.toFixed(2) }} />
+const TIP_DISP = <TipBox rows={{ disp: v => v.toFixed(1) + '%', peakline: v => v.toFixed(1) + '%' }} />
+const TIP_RSI = <TipBox rows={{ rsi: v => v.toFixed(1), peakline_r: v => v.toFixed(1) }} />
+const TIP_SIM = <TipBox rows={{
+  sim: v => v < 10 ? v.toFixed(2) : Math.round(v).toLocaleString(),
+  q1: v => Math.round(v).toLocaleString() }} />
+
 const xTickFmt = (span) => (v) => {
   const y = Math.floor(v + 1e-6), m = Math.min(12, Math.max(1, Math.round((v - y) * 12) + 1))
   return span > 2.5 ? `'${String(y).slice(2)}` : `${String(y).slice(2)}.${m}`
 }
 
 export default function Monitor() {
-  const [ma, setMa] = useState(200)
+  const [ma, setMa] = useState(180)
   const [range, setRange] = useState('all')
   const [end, setEnd] = useState(null)
   const [pin, setPin] = useState(null)
   const [tab, setTab] = useState('cycle')
   const D = useMonitor(ma, 14)
-  const { rows, cycles, fit, bands, now, annual, sim, rolls } = D
+  const { rows, cycles, marks, fit, bands, now, annual, sim, rolls } = D
 
   const withPx = useMemo(() => rows.filter(r => r.px != null), [rows])
   const tFirst = withPx[0].t, tLast = withPx[withPx.length - 1].t
@@ -115,12 +133,27 @@ export default function Monitor() {
   const maxEnd = tLast, minEnd = Math.min(tFirst + span, tLast)
   const tEnd = Math.min(maxEnd, Math.max(minEnd, end ?? tLast))
   const tStart = tEnd - span
-  const view = useMemo(
-    () => withPx.filter(r => r.t >= tStart - 0.02 && r.t <= tEnd + 0.02),
-    [withPx, tStart, tEnd])
+  // 넓게 볼 때만 솎아낸다. 1~3년으로 좁히면 일봉 그대로 나온다.
+  // 사이클 고점·저점 날짜는 반드시 남긴다 — 솎이면 축 자동범위가 그만큼
+  // 좁아져서 그 자리에 찍을 마커가 범위 밖으로 버려진다.
+  const markT = useMemo(() => new Set(marks.map(m => m.t)), [marks])
+  const view = useMemo(() => {
+    const w = withPx.filter(r => r.t >= tStart - 0.02 && r.t <= tEnd + 0.02)
+    if (w.length <= MAX_PTS) return w
+    const step = Math.ceil(w.length / MAX_PTS)
+    const out = w.filter((r, i) => i % step === 0 || markT.has(r.t))
+    if (out[out.length - 1] !== w[w.length - 1]) out.push(w[w.length - 1])
+    return out
+  }, [withPx, tStart, tEnd, markT])
+
+  // ④ 장기전망은 1999년부터 6,900일이라 같은 이유로 솎아낸다(구간 고정).
+  const simView = useMemo(() => {
+    const step = Math.ceil(sim.series.length / MAX_PTS)
+    return step <= 1 ? sim.series : sim.series.filter((_, i) => i % step === 0)
+  }, [sim])
 
   const shift = d => setEnd(Math.min(maxEnd, Math.max(minEnd, tEnd + d)))
-  const xf = xTickFmt(span)
+  const xf = useMemo(() => xTickFmt(span), [span])
   const ticks = useMemo(() => {
     const st = span > 12 ? 2 : span > 6 ? 1 : span > 2.5 ? 0.5 : span > 1.2 ? 0.25 : 1 / 12
     const out = []
@@ -128,15 +161,16 @@ export default function Monitor() {
     return out
   }, [span, tStart, tEnd])
 
-  const XA = { dataKey: 't', type: 'number', domain: [tStart, tEnd], ticks, tickFormatter: xf,
-    tick: { fill: MUTE, fontSize: 10.5 }, axisLine: { stroke: '#1f2b2e' }, tickLine: false, allowDataOverflow: true }
+  const XA = useMemo(() => ({ dataKey: 't', type: 'number', domain: [tStart, tEnd], ticks, tickFormatter: xf,
+    tick: { fill: MUTE, fontSize: 10.5 }, axisLine: { stroke: '#1f2b2e' }, tickLine: false, allowDataOverflow: true }),
+  [tStart, tEnd, ticks, xf])
   // recharts는 차트 위 mousemove가 선행돼야 activeLabel을 채운다.
   // 값을 못 잡은 클릭은 무시해야 고정이 엉뚱하게 유지되지 않는다.
-  const onClickChart = e => {
+  const onClickChart = useCallback(e => {
     const x = e?.activeLabel
     if (typeof x !== 'number') return
     setPin(p => (p != null && Math.abs(p - x) < 1e-9) ? null : x)
-  }
+  }, [])
   const pinLine = () => pin == null ? null
     : <ReferenceLine x={pin} stroke={INK} strokeWidth={1.4} ifOverflow="extendDomain" />
 
@@ -239,10 +273,9 @@ export default function Monitor() {
               <XAxis {...XA} />
               <YAxis scale="log" domain={['auto', 'auto']} width={64} tick={{ fill: MUTE, fontSize: 10 }}
                 axisLine={false} tickLine={false} tickFormatter={v => Math.round(v).toLocaleString()} />
-              <Tooltip content={<TipBox rows={{ growth: v => Math.round(v).toLocaleString(), dd: v => v + '%' }} />} />
+              <Tooltip content={TIP_GROWTH} />
               <Line type="monotone" dataKey="growth" name="성장지수" stroke={S1} strokeWidth={1.8} dot={false} isAnimationActive={false} />
-              <Scatter dataKey="mkPeakGrowth" shape={PEAK_DOT} isAnimationActive={false} legendType="none" />
-              <Scatter dataKey="mkTrGrowth" shape={TR_DOT} isAnimationActive={false} legendType="none" />
+              {marksFor(marks, 'growth')}
               {pinLine()}
             </ComposedChart>
           </ResponsiveContainer>
@@ -253,7 +286,7 @@ export default function Monitor() {
               <YAxis domain={[-90, 0]} ticks={[0, -20, -40, -60, -80]} width={64}
                 tickFormatter={v => v + '%'} tick={{ fill: MUTE, fontSize: 10 }} axisLine={false} tickLine={false} />
               <ReferenceLine y={-40} stroke={S3} strokeOpacity={0.45} />
-              <Tooltip content={<TipBox rows={{ dd: v => v + '%' }} />} />
+              <Tooltip content={TIP_DD} />
               <Area type="monotone" dataKey="dd" name="고점대비 낙폭" stroke={S3} strokeWidth={1.4} fill={S3} fillOpacity={0.22} dot={false} isAnimationActive={false} />
               {pinLine()}
             </ComposedChart>
@@ -290,10 +323,9 @@ export default function Monitor() {
               <XAxis {...XA} />
               <YAxis scale="log" domain={['auto', 'auto']} width={64} tick={{ fill: MUTE, fontSize: 10 }}
                 axisLine={false} tickLine={false} tickFormatter={v => '$' + (v >= 10 ? v.toFixed(0) : v.toFixed(2))} />
-              <Tooltip content={<TipBox rows={{ px: v => '$' + v.toFixed(2) }} />} />
+              <Tooltip content={TIP_PX} />
               <Line type="monotone" dataKey="px" name="TQQQ 종가" stroke={S2} strokeWidth={1.5} dot={false} isAnimationActive={false} />
-              <Scatter dataKey="mkPeakPx" shape={PEAK_DOT} isAnimationActive={false} legendType="none" />
-              <Scatter dataKey="mkTrPx" shape={TR_DOT} isAnimationActive={false} legendType="none" />
+              {marksFor(marks, 'px')}
               {pinLine()}
             </ComposedChart>
           </ResponsiveContainer>
@@ -308,11 +340,10 @@ export default function Monitor() {
                 tick={{ fill: MUTE, fontSize: 10 }} axisLine={false} tickLine={false} />
               <ReferenceLine y={100} stroke={MUTE} strokeOpacity={0.5} />
               <ReferenceLine y={bands.up_disp} stroke={S3} strokeOpacity={0.55} />
-              <Tooltip content={<TipBox rows={{ disp: v => v.toFixed(1) + '%', peakline: v => v.toFixed(1) + '%' }} />} />
+              <Tooltip content={TIP_DISP} />
               <Line type="monotone" dataKey="disp" name={`이격도(MA${ma})`} stroke={S1} strokeWidth={1.5} dot={false} isAnimationActive={false} />
               <Line type="monotone" dataKey="peakline" name="국면 예상 고점" stroke={S4} strokeWidth={1.2} strokeDasharray="4 3" dot={false} isAnimationActive={false} />
-              <Scatter dataKey="mkPeakDisp" shape={PEAK_DOT} isAnimationActive={false} legendType="none" />
-              <Scatter dataKey="mkTrDisp" shape={TR_DOT} isAnimationActive={false} legendType="none" />
+              {marksFor(marks, 'disp')}
               {pinLine()}
             </ComposedChart>
           </ResponsiveContainer>
@@ -326,11 +357,10 @@ export default function Monitor() {
               <YAxis domain={[0, 100]} ticks={[0, bands.dn_rsi, 50, bands.up_rsi, 100]} width={64}
                 tick={{ fill: MUTE, fontSize: 10 }} axisLine={false} tickLine={false} />
               <ReferenceLine y={50} stroke={MUTE} strokeOpacity={0.4} />
-              <Tooltip content={<TipBox rows={{ rsi: v => v.toFixed(1), peakline_r: v => v.toFixed(1) }} />} />
+              <Tooltip content={TIP_RSI} />
               <Line type="monotone" dataKey="rsi" name="RSI(14)" stroke={S4} strokeWidth={1.4} dot={false} isAnimationActive={false} />
               <Line type="monotone" dataKey="peakline_r" name="국면 예상 고점" stroke={S1} strokeWidth={1.1} strokeDasharray="4 3" dot={false} isAnimationActive={false} />
-              <Scatter dataKey="mkPeakRsi" shape={PEAK_DOT} isAnimationActive={false} legendType="none" />
-              <Scatter dataKey="mkTrRsi" shape={TR_DOT} isAnimationActive={false} legendType="none" />
+              {marksFor(marks, 'rsi')}
               {pinLine()}
             </ComposedChart>
           </ResponsiveContainer>
@@ -451,7 +481,7 @@ export default function Monitor() {
             TQQQ가 겪지 않은 닷컴 버블까지 포함해 봤습니다.
           </p>
           <ResponsiveContainer width="100%" height={300}>
-            <ComposedChart data={sim.series} margin={{ top: 10, right: 18, left: 4, bottom: 5 }}>
+            <ComposedChart data={simView} margin={{ top: 10, right: 18, left: 4, bottom: 5 }}>
               <CartesianGrid stroke={GRID} vertical={false} />
               <XAxis dataKey="t" type="number" domain={[1999, 'dataMax']}
                 ticks={[2000, 2004, 2008, 2012, 2016, 2020, 2024]} tickFormatter={v => `'${String(v).slice(2)}`}
@@ -459,9 +489,7 @@ export default function Monitor() {
               <YAxis scale="log" domain={[0.1, 3000]} ticks={[1, 10, 100, 1000]} width={56}
                 tick={{ fill: MUTE, fontSize: 10 }} axisLine={false} tickLine={false} />
               <ReferenceLine y={100} stroke={MUTE} strokeOpacity={0.4} />
-              <Tooltip content={<TipBox rows={{
-                sim: v => v < 10 ? v.toFixed(2) : Math.round(v).toLocaleString(),
-                q1: v => Math.round(v).toLocaleString() }} />} />
+              <Tooltip content={TIP_SIM} />
               <Line type="monotone" dataKey="q1" name="QQQ (1배)" stroke={S2} strokeWidth={1.6} dot={false} isAnimationActive={false} />
               <Line type="monotone" dataKey="sim" name="3배 시뮬" stroke={S3} strokeWidth={1.6} dot={false} isAnimationActive={false} />
               <Legend wrapperStyle={{ fontSize: 11, color: MUTE }} />
