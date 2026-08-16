@@ -4,16 +4,19 @@
 
 export const MDD_TH = -30;   // 사이클로 셀 최소 낙폭(%)
 export const DEEP_TH = -40;  // 이보다 깊으면 '깊은 낙폭'
-// 과열 이격도 기준선. 200일선 시절의 115를 180일선으로 옮긴 값 —
-// scripts/calibrate-overheat.mjs 로 재보정했고 근거 세 가지가 모두 114로 모인다.
-//   1) QQQ180≥114 는 옛 QQQ200≥115 와 성능이 같다 (고점 7/13·체류 3.5%·효율 15.4)
-//   2) 전략 매도선(TQQQ 180일 이격도 +40%)에 걸린 날의 QQQ180 이격도 중앙값 114.1
-//   3) 사이클 고점 13개의 QQQ180 이격도 중앙값 114.7
-// 115를 그대로 두면 같은 조합의 고점 포착이 7/13 → 5/13으로 떨어진다.
-export const UP_DISP = 114;
-export const UP_RSI = 70;    // 과열 RSI
-export const DN_DISP = 90;   // 깊은 저점 이격도
-export const DN_RSI = 33;    // 과매도 RSI
+// 과열 밴드 = 매도 전략의 트리거를 그대로 쓴다 (backtest.js SELL_DISP/sellRsi).
+// 화면과 전략이 같은 숫자를 보게 하는 것이 목적이라 여기서는 최적화하지 않는다.
+export const UP_DISP = 40;   // 이격도 +40% 초과 → 전략 매도 조건
+export const UP_RSI = 73;    // RSI 73 이상 → 전략 매도 조건
+// 과매도 밴드는 전략에 대응하는 규칙이 없다(매수는 정액 적립이라 트리거가 없음).
+// 사이클 저점 13개 실측에서 뽑았다 — scripts/calibrate-bands.mjs 참고.
+//   이격도 -30% : 저점 이격도 중앙값 -29.2%와 사실상 같은 자리.
+//                 저점 6/13 포착 · 체류 5.3% · 효율 8.7 (-20%는 7/13이지만 효율 6.0).
+//                 옛 QQQ 기준선 90(=QQQ -10%)이 TQQQ로는 대략 이 자리다.
+//   RSI 33     : 저점 RSI 중앙값 30.6. 저점 11/13 포착 · 체류 3.1% · 효율 27.3.
+//                 이미 TQQQ RSI 기준이라 기준 변경의 영향이 없어 그대로 둔다.
+export const DN_DISP = -30;
+export const DN_RSI = 33;
 
 export const toT = (ymd) => {
   const y = +ymd.slice(0, 4), m = +ymd.slice(5, 7), d = +ymd.slice(8, 10);
@@ -79,12 +82,32 @@ export function addDrawdown(rows) {
   return rows;
 }
 
-/** 이격도·RSI (MA 기간 가변) */
+/** 상장 전 null 구간을 건너뛰는 SMA (TQQQ처럼 앞이 비어 있는 계열용) */
+export function smaSkipNull(arr, n) {
+  const out = new Array(arr.length).fill(null);
+  const buf = [];
+  let s = 0;
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i] == null) continue;
+    buf.push(arr[i]); s += arr[i];
+    if (buf.length > n) s -= buf.shift();
+    if (buf.length === n) out[i] = s / n;
+  }
+  return out;
+}
+
+/**
+ * 이격도·RSI (MA 기간 가변).
+ * 이격도는 매도 전략(backtest.js calcDisparity)과 완전히 같은 정의를 쓴다 —
+ * TQQQ 종가가 자기 ma일선에서 몇 % 떨어져 있는가. 0 = 선 위, +40 = 매도선.
+ * TQQQ 자체 이동평균이라 상장 +ma거래일 전까지는 값이 없다(전략도 그때는 못 판다).
+ */
 export function addIndicators(rows, ma = 180, rsiN = 14) {
-  const m = sma(rows.map(r => r.q), ma);
-  const rs = wilderRsi(rows.map(r => r.px), rsiN);
+  const px = rows.map(r => r.px);
+  const m = smaSkipNull(px, ma);
+  const rs = wilderRsi(px, rsiN);
   rows.forEach((r, i) => {
-    r.disp = m[i] ? +(r.q / m[i] * 100).toFixed(2) : null;
+    r.disp = m[i] ? +((r.px / m[i] - 1) * 100).toFixed(2) : null;
     r.rsi = rs[i] == null ? null : +rs[i].toFixed(1);
   });
   return rows;
@@ -168,11 +191,18 @@ export function cycleMarks(cycles) {
   return out;
 }
 
-/** 국면 예상 고점선을 각 행에 붙인다 */
+/**
+ * 국면 예상 고점선을 각 행에 붙인다.
+ * 회귀는 고점 표본의 x 범위(직전 6개월 QQQ 상승률 +5~+44%) 안에서만 적합됐다 —
+ * 고점은 늘 상승 끝에 생기니 당연하다. 그 밖까지 외삽하면 하락장에서
+ * "예상 고점 이격도 -42%" 같은 값이 나와 선도 축도 망가지므로 적합 범위에서 자른다.
+ */
 export function addPeakLines(rows, fit) {
+  const xs = fit.pts.map(p => p.x);
+  const lo = Math.min(...xs), hi = Math.max(...xs);
   rows.forEach((r, i) => {
     if (i < 126) { r.peakline = r.peakline_r = null; return; }
-    const g = (r.q / rows[i - 126].q - 1) * 100;
+    const g = Math.min(hi, Math.max(lo, (r.q / rows[i - 126].q - 1) * 100));
     r.peakline = +(fit.d.a + fit.d.b * g).toFixed(2);
     r.peakline_r = +(fit.r.a + fit.r.b * g).toFixed(2);
   });
