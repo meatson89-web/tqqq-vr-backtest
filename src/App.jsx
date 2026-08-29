@@ -6,7 +6,7 @@ import {
 import {
   getRollingWindows, runFinalBacktest, DEFAULT_SETTINGS, DATA_START, DATA_END,
   SIM_START, dataForSource,
-  getBoosterStatus, getSellConditionStatus, checkGainCondition,
+  getBoosterStatus, getSellConditionStatus, checkGainCondition, getRegimeStatus,
   throttlePctForRsi, throttleFirstTier,
 } from './lib/backtest'
 import Monitor from './monitor/Monitor.jsx'
@@ -16,6 +16,9 @@ import './App.css'
 // 부스터 세로 음영(#f59e0b, 투명도 0.14)과 구분되도록 더 진한 주황을 쓴다.
 const STOCK_COLOR = '#10b981'
 const HOT_COLOR = '#f97316'
+// 나스닥100이 200일선 아래인 구간(POOL 지출 정지) 음영.
+// 부스터 주황과 반대 의미라 대비되는 청회색을 쓴다.
+const REGIME_COLOR = '#64748b'
 
 function fmtPct(v) {
   return `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
@@ -41,6 +44,7 @@ const rulesOf = settings => [
   { label: '매도 비율', value: '주식 70%' },
   { label: '매도 쿨다운', value: '10거래일' },
   { label: '과열 스로틀', value: 'RSI ≥ 70 → POOL 0%' },
+  { label: '추세국면', value: settings.regimeEnabled ? `QQQ < ${settings.regimeMaLen}일선 → POOL 정지` : '사용 안 함' },
 ]
 
 function RulesPanel({ settings }) {
@@ -228,6 +232,48 @@ function StrategyInfo() {
           이웃 값으로 바꿔도 전체 결과가 1.1배 안에서만 움직입니다. 확정된 개선으로 보지 마세요.
         </p>
         <p>
+          <b>추세국면 필터 (신규)</b> — 나스닥100(QQQ)의 <i>전일</i> 종가가 200일선 아래인
+          동안 <b>부스터와 POOL 재투자를 모두 멈춥니다</b>. 주간 정액 적립금은 그대로
+          들어가고, <b>매도는 전혀 하지 않는 순수 매수측 규칙</b>입니다. 선 위로 돌아오면
+          즉시 해제되며 복귀 후 가속 매수도 하지 않습니다. 차트의 청회색 세로 음영이 이 구간입니다.
+        </p>
+        <p>
+          <b>왜 매도가 아니라 매수를 막는가</b> — 2019-02~2024-02 창의 총자산 고점(19.97억,
+          2021-12-27)에서 <b>주식비중은 이미 32.1%였고 현금이 67.9%였습니다.</b> 그런데도 MDD가
+          -79.1%였습니다. 고점부터 저점까지 <b>부스터가 10.61억을 하락장에 재투입</b>했기 때문입니다.
+          팔 주식이 부족한 게 아니라 <i>현금을 하락 도중에 다 쓴 것</i>이므로, 세금 22%를 물고
+          더 파는 것보다 안 쓰게 막는 쪽이 쌉니다. 실제로 2022-01-26 하루에 POOL 11.05억의 60%인
+          <b>6.63억이 하락 초입에 투입</b>됐고, 이 규칙은 바로 그걸 막습니다.
+        </p>
+        <p>
+          <b>성과 — 연속 경로에서는 이기고, 5년 창에서는 집니다.</b> 둘 다 사실이라 같이 적습니다.
+          연속 경로(실제로 겪는 모습)는 실제 TQQQ 2010-2026 기준 <b>1252.72억/MDD -80.4% → 1358.77억/MDD -55.1%</b>,
+          합성 1999-2026 기준 2233.17억 → 2587.52억(+15.9%)입니다. 반면 5년 창 23개로 세면
+          <b>합계 -2.0%, 중앙값 -0.2%, 7승 12패</b>입니다. 2022가 없는 창에서는 일관되게 집니다
+          (2016-02창 -15.9%, 2017-02창 -15.4%, 2009-03창 -11.2%). 창이 매번 1억으로 새로 시작해서
+          2022를 피한 이득이 창 밖으로 못 넘어가기 때문입니다. <b>평시에 조금씩 내고 10년에 한 번
+          크게 받는 보험</b>으로 보는 게 정확합니다.
+        </p>
+        <p>
+          <b>추세국면 — 믿지 말아야 할 부분.</b> 개선의 거의 전부가 <b>2022-01-26 단 한 주</b>에서 나옵니다.
+          이탈 후 며칠까지 기다렸다가 잠그는 방식을 시험해 보면 4일까지는 평탄하지만 5일부터 절벽입니다
+          (TQQQ 평균 +6.7% → -4.4%). 그 매수가 이탈 3거래일째에 일어나기 때문이며, 이는
+          <b>단일 사건 의존이라는 뜻</b>입니다. 반면 MA 기간은 100~250 전 구간에서 MDD 개선이
+          TQQQ +6.9~8.7%p로 평탄해 200은 봉우리가 아니라 고원 안입니다 — 이쪽은 과최적화가 아닙니다.
+          검증 규격상 <b>G4(유의성)는 통과하지 못합니다</b> — 블록 부트스트랩 95% 신뢰구간이
+          [-3.9, 12.8]로 0을 포함합니다. 27년 표본에서 이 규칙이 활약할 국면(POOL이 큰 상태에서의
+          장기 하락)이 사실상 2022 한 번뿐이라 표본이 근본적으로 부족합니다.
+        </p>
+        <p>
+          <b>추세국면 — 비용과 무효 구간.</b> 비용은 코로나형 V자 급락입니다. 2015-05~2020-05 창은
+          12.90억 → <b>10.66억(-17.3%)</b>이 됩니다 — 2020-03-18~04-08의 바닥 매수 3.4억이 잠겨서
+          200일선 복귀 후 더 비싼 가격에 사게 되기 때문입니다. 200일선은 <i>V자 급락</i>과
+          <i>장기 하락</i>을 구분하지 못합니다. 같은 규칙이 2022를 구하고 2020을 망칩니다.
+          그리고 <b>닷컴·금융위기에는 아예 무효합니다</b>(닷컴 1.41억 → 1.41억, MDD -98.7% 그대로).
+          POOL은 수익실현 매도로만 채워지는데 장기 약세장에는 매도가 안 나와 <i>지킬 현금 자체가
+          없기</i> 때문입니다. 이 규칙을 켜도 그런 국면은 못 피합니다.
+        </p>
+        <p>
           <b>이 전략이 막지 못하는 것</b> — 실제 TQQQ는 2010-02 상장이라 닷컴버블도 금융위기도
           없습니다. 그래서 QQQ로 1999년까지 역산한 합성 데이터(<code>scripts/build-sim-tqqq.py</code>,
           차입비용 반영, 실제 TQQQ와 일간 상관 0.9989·MDD -81.5% vs -81.7%로 검증)를
@@ -238,8 +284,9 @@ function StrategyInfo() {
           올라갈 일이 없어, 5년간 매도가 2~3회에 그칩니다. 매도 규칙이 구조적으로 발동하지 못합니다.
           독립 표본 5개(카키색) 중 2개가 이 구간이라는 점을 기억하세요 — 초록색 카드만 보면
           이 전략이 안전해 보이지만, 겹치는 창을 걷어내고 보면 <b>5개 중 2개가 원금의 절반 이하로 끝납니다.</b>{' '}
-          순수 적립식, MA200 추세필터를 포함해 어떤 규칙도 이 구간을 구하지 못했습니다(추세필터는
-          닷컴 구간에서 오히려 1.41억→1.29억으로 나빴습니다). 기초자산이 -99.95% 빠지면 그 자산
+          순수 적립식을 포함해 어떤 규칙도 이 구간을 구하지 못했습니다. 위에 넣은
+          <b>추세국면 필터도 닷컴에는 1.41억 → 1.41억으로 아무 변화가 없습니다</b>
+          (금융위기 0.66→0.69억). 잠금이 100주 넘게 걸려도 쓸 POOL 자체가 없어 발동할 대상이 없기 때문입니다. 기초자산이 -99.95% 빠지면 그 자산
           안에서의 매매 규칙으로는 해결되지 않습니다. 이 리스크에 대한 대응은 파라미터가 아니라
           비중 상한·자산배분 차원이어야 합니다.
         </p>
@@ -249,12 +296,15 @@ function StrategyInfo() {
           한번에 반영됩니다. 매도 RSI 임계도 파라미터로 열어 두었습니다.
           나머지 매도 조건(이격도 40%·수익률 25%·매도비율 70%·쿨다운 10일)과
           과열 스로틀(RSI 70 → POOL 0%)은 화면에서 조정할 수 없는 고정 상수입니다.
+          추세국면 필터는 사용 여부와 MA 기간만 열어 두었습니다 — 대기일수(1일)와 복귀 후
+          가속 재투자(0주)는 스윕에서 기각된 값이라 고정했습니다.
         </p>
         <p style={{ color: '#9ca3af', fontSize: 12 }}>
           위 검증 수치를 다시 뽑는 스크립트: <code>scripts/restate-evidence.mjs</code>(옵션별 23창 재측정),{' '}
           <code>scripts/sweep-sellrsi.mjs</code>(매도 RSI 스윕), <code>scripts/window-design.mjs</code>(슬라이드 간격 비교),{' '}
-          <code>scripts/opt-rsi-throttle6.mjs</code>(합성 90창), <code>scripts/validate.mjs</code>(변경안 게이트).
-          마지막 갱신: 2026-08-08.
+          <code>scripts/opt-rsi-throttle6.mjs</code>(합성 90창), <code>scripts/validate.mjs</code>(변경안 게이트),{' '}
+          <code>scripts/sweep-regime.mjs</code>(추세국면 스윕 — 대기일수·부스터비율·가속주수).
+          마지막 갱신: 2026-08-29 (추세국면 필터 추가 · 기본 ON).
         </p>
       </div>
     </div>
@@ -340,6 +390,26 @@ function ParametersPanel({ draft, onDraftChange, onApply, dirty }) {
         {numField('RSI 완화폭', draft.relaxRsiDrop, v => set('relaxRsiDrop', v), { min: 0, max: 40, step: 1, unit: 'p', disabled: !draft.relaxEnabled, preset: [0, 0] })}
         {numField('이격도 완화폭', draft.relaxDispDrop, v => set('relaxDispDrop', v), { min: 0, max: 40, step: 1, unit: 'p', disabled: !draft.relaxEnabled, preset: [12, 20] })}
         {numField('완화매도 비율', draft.relaxSellFrac * 100, v => set('relaxSellFrac', v / 100), { min: 1, max: 70, step: 1, unit: '%', disabled: !draft.relaxEnabled, preset: [5, 40] })}
+      </div>
+
+      <div className="param-divider" />
+
+      <label className="param-checkbox">
+        <input
+          type="checkbox"
+          checked={draft.regimeEnabled}
+          onChange={e => set('regimeEnabled', e.target.checked)}
+        />
+        추세국면 필터 사용 (나스닥100이 200일선 아래면 POOL 지출 정지)
+      </label>
+      <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'left', margin: '4px 0 0' }}>
+        나스닥100(QQQ) <b>전일</b> 종가가 200일선 아래인 동안 부스터와 POOL 재투자를 모두 멈춥니다.
+        주간 정액 적립금은 그대로 들어가고 <b>매도는 하지 않습니다</b>. MA 기간은 100~250 전 구간에서
+        결과가 평탄해 200에 맞춰 깎은 값이 아닙니다. 대기일수·복귀 후 가속 재투자는 데이터가 기각해
+        각각 1일·0주로 고정했습니다(전략 설명 참조).
+      </p>
+      <div className="param-grid">
+        {numField('국면 MA 기간', draft.regimeMaLen, v => set('regimeMaLen', v), { min: 50, max: 300, step: 10, unit: '일', disabled: !draft.regimeEnabled, preset: [200, 200] })}
       </div>
 
       <div className="param-divider" />
@@ -459,6 +529,7 @@ function PoolRatioBadge({ s }) {
 
 function BoosterStatusPanel({ settings }) {
   const s = useMemo(() => getBoosterStatus(settings), [settings])
+  const rg = useMemo(() => getRegimeStatus(settings), [settings])
   if (!s.enabled) {
     return (
       <div className="rules-panel">
@@ -495,7 +566,23 @@ function BoosterStatusPanel({ settings }) {
           />
         )}
         <StatusItem label="이번 주 실제 재투자 비율" value={`${s.effectivePoolPct}%`} tone={s.effectivePoolPct < s.basePoolPct ? 'warn' : undefined} />
+        {rg.enabled && (
+          <StatusItem
+            label={`추세국면 (나스닥100 ${rg.dwellDays === 1 ? '' : `${rg.dwellDays}일 `}${settings.regimeMaLen}일선)`}
+            value={rg.locked
+              ? `이탈 ${rg.dwell}일째 · POOL 지출 정지`
+              : `선 위 ${rg.gapPct >= 0 ? '+' : ''}${rg.gapPct.toFixed(1)}% · 정상`}
+            tone={rg.locked ? 'warn' : undefined}
+          />
+        )}
       </div>
+      {rg.enabled && (
+        <p style={{ color: '#9ca3af', fontSize: 12, textAlign: 'left', marginTop: 10 }}>
+          {rg.locked
+            ? `나스닥100(QQQ) 전일 종가 ${rg.close.toFixed(2)}가 ${settings.regimeMaLen}일선 ${rg.ma.toFixed(2)} 아래라 부스터와 POOL 재투자가 모두 정지된 상태입니다. 주간 정액 적립금은 그대로 들어갑니다. 종가가 ${settings.regimeMaLen}일선 위로 돌아오는 즉시 해제되며, 복귀 후 가속 매수는 하지 않습니다.`
+            : `나스닥100(QQQ) 전일 종가 ${rg.close.toFixed(2)}가 ${settings.regimeMaLen}일선 ${rg.ma.toFixed(2)}보다 ${rg.gapPct.toFixed(1)}% 위라 국면 필터는 잠자입니다. 종가가 ${rg.ma.toFixed(2)} 아래로 내려가면 다음 날부터 부스터와 POOL 재투자가 멈춥니다(매도는 하지 않음).`}
+        </p>
+      )}
       <p style={{ color: '#9ca3af', fontSize: 12, textAlign: 'left', marginTop: 10 }}>
         {s.boosterOn
           ? `가격이 $${s.offPrice.toFixed(2)} 이상으로 오르거나, 고점이 ${s.lookback}일 창에서 밀려나 기준 고점 자체가 낮아지면 부스터가 꺼집니다.`
@@ -706,6 +793,23 @@ function BacktestDetail({ window: win, settings }) {
   }, [daily])
   const boostBoundaryDates = useMemo(() => new Set(boostRanges.flat()), [boostRanges])
 
+  // 200일선 아래로 잠긴 구간. 차트 음영용으로 연속 구간으로 묶는다.
+  const regimeRanges = useMemo(() => {
+    if (!settings.regimeEnabled) return []
+    const ranges = []
+    let start = null
+    for (let i = 0; i < daily.length; i++) {
+      if (daily[i].regimeLocked && start === null) start = daily[i].date
+      if (!daily[i].regimeLocked && start !== null) {
+        ranges.push([start, daily[i - 1].date])
+        start = null
+      }
+    }
+    if (start !== null) ranges.push([start, daily[daily.length - 1].date])
+    return ranges
+  }, [daily, settings.regimeEnabled])
+  const regimeBoundaryDates = useMemo(() => new Set(regimeRanges.flat()), [regimeRanges])
+
   // 과열 스로틀이 걸리는 날(=RSI가 임계 이상)의 경계일. 차트를 5일 간격으로 솎아내므로
   // 경계일을 따로 남겨두지 않으면 음영/색 전환 지점이 최대 5일씩 밀린다.
   const hotBoundaryDates = useMemo(() => {
@@ -724,7 +828,7 @@ function BacktestDetail({ window: win, settings }) {
 
   const chartData = useMemo(() => {
     return daily
-      .filter((d, i) => i % 5 === 0 || sellDates.has(d.date) || boostBoundaryDates.has(d.date) || hotBoundaryDates.has(d.date))
+      .filter((d, i) => i % 5 === 0 || sellDates.has(d.date) || boostBoundaryDates.has(d.date) || hotBoundaryDates.has(d.date) || regimeBoundaryDates.has(d.date))
       .map(d => ({
         date: d.date,
         pool: d.pool,
@@ -737,7 +841,7 @@ function BacktestDetail({ window: win, settings }) {
         sell: sellDates.has(d.date) ? d.total : null,
         sellRelaxed: relaxedSellDates.has(d.date),
       }))
-  }, [daily, sellDates, relaxedSellDates, boostBoundaryDates, hotBoundaryDates, settings])
+  }, [daily, sellDates, relaxedSellDates, boostBoundaryDates, hotBoundaryDates, regimeBoundaryDates, settings])
 
   // 주식 영역을 구간별로 다른 색으로 칠하기 위한 가로 그라디언트 stop 목록.
   // 전환 지점마다 같은 offset에 stop을 두 개 찍어 색이 그라데이션 없이 딱 끊기게 한다.
@@ -764,15 +868,17 @@ function BacktestDetail({ window: win, settings }) {
   // 부스터/완화매도 on-off 4가지 조합을 한번에 비교 (체크박스 일일이 바꿔가며
   // 재조회하지 않아도 되도록). '세팅값'은 현재 파라미터 패널에 적용된 그대로.
   const compareRows = useMemo(() => {
+    const R = settings.regimeEnabled
     const variants = [
-      { label: '세팅값', enabled: settings.enabled, relaxEnabled: settings.relaxEnabled, isCurrent: true },
-      { label: '부스터 적용', enabled: true, relaxEnabled: false },
-      { label: '완화매도 적용', enabled: false, relaxEnabled: true },
-      { label: '완화매도+부스터 적용', enabled: true, relaxEnabled: true },
+      { label: '세팅값', enabled: settings.enabled, relaxEnabled: settings.relaxEnabled, regimeEnabled: R, isCurrent: true },
+      { label: R ? '추세국면 끄기' : '추세국면 켜기', enabled: settings.enabled, relaxEnabled: settings.relaxEnabled, regimeEnabled: !R },
+      { label: '부스터 적용', enabled: true, relaxEnabled: false, regimeEnabled: R },
+      { label: '완화매도 적용', enabled: false, relaxEnabled: true, regimeEnabled: R },
+      { label: '완화매도+부스터 적용', enabled: true, relaxEnabled: true, regimeEnabled: R },
     ]
     return variants.map(v => {
       const { stats: vStats } = runFinalBacktest(win.startDate, win.endDate, {
-        ...settings, enabled: v.enabled, relaxEnabled: v.relaxEnabled,
+        ...settings, enabled: v.enabled, relaxEnabled: v.relaxEnabled, regimeEnabled: v.regimeEnabled,
       }, data)
       return { label: v.label, isCurrent: !!v.isCurrent, stats: vStats }
     })
@@ -834,6 +940,12 @@ function BacktestDetail({ window: win, settings }) {
             <span className="value">{stats.relaxedSellCount}/{stats.sellCount}회</span>
           </div>
         )}
+        {settings.regimeEnabled && (
+          <div className="stat-item">
+            <span className="label">국면 잠금</span>
+            <span className="value">{stats.lockedWeeks}/{stats.totalWeeks}주</span>
+          </div>
+        )}
       </div>
 
       <div className="sub-heading">설정별 비교 (동일 기간, 나머지 파라미터 동일)</div>
@@ -875,6 +987,9 @@ function BacktestDetail({ window: win, settings }) {
           <XAxis dataKey="date" minTickGap={80} />
           <YAxis tickFormatter={v => `${(v / 1e8).toFixed(1)}억`} width={55} />
           <Tooltip content={<CustomTooltip />} />
+          {regimeRanges.map(([s, e]) => (
+            <ReferenceArea key={`rg-${s}-${e}`} x1={s} x2={e} fill={REGIME_COLOR} fillOpacity={0.22} strokeOpacity={0} ifOverflow="visible" />
+          ))}
           {boostRanges.map(([s, e]) => (
             <ReferenceArea key={`${s}-${e}`} x1={s} x2={e} fill="#f59e0b" fillOpacity={0.14} strokeOpacity={0} ifOverflow="visible" />
           ))}
@@ -896,7 +1011,7 @@ function BacktestDetail({ window: win, settings }) {
           <Scatter dataKey="sell" shape={<SellDot />} isAnimationActive={false} />
         </ComposedChart>
       </ResponsiveContainer>
-      {(hasHot || (settings.enabled && boostRanges.length > 0)) && (
+      {(hasHot || regimeRanges.length > 0 || (settings.enabled && boostRanges.length > 0)) && (
         <div style={{ fontSize: 12, color: '#9ca3af', marginTop: -18, marginBottom: 18, display: 'flex', gap: 18, flexWrap: 'wrap' }}>
           {settings.enabled && boostRanges.length > 0 && (
             <span>
@@ -908,6 +1023,12 @@ function BacktestDetail({ window: win, settings }) {
             <span>
               <span style={{ display: 'inline-block', width: 10, height: 10, background: HOT_COLOR, opacity: 0.75, marginRight: 6, verticalAlign: 'middle' }} />
               주식 영역이 주황색 = RSI(14) {throttleRsi} 이상 과열 스로틀 구간 (그 주 POOL 재투자 중단, 정액 적립은 유지)
+            </span>
+          )}
+          {regimeRanges.length > 0 && (
+            <span>
+              <span style={{ display: 'inline-block', width: 10, height: 10, background: REGIME_COLOR, opacity: 0.6, marginRight: 6, verticalAlign: 'middle' }} />
+              세로 청회색 음영 = 나스닥100이 {settings.regimeMaLen}일선 아래 (POOL 지출 정지, 정액 적립은 유지)
             </span>
           )}
         </div>

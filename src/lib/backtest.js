@@ -2,6 +2,9 @@ import tqqqRaw from '../data/tqqq.json' with { type: 'json' };
 // QQQ로 1999년까지 역산한 합성 TQQQ. 실제 TQQQ는 2010-02부터라 닷컴·금융위기가 없다.
 // 생성: python scripts/build-sim-tqqq.py (3배 곱이 아니라 차입비용까지 반영)
 import tqqqSimRaw from '../data/tqqq_sim.json' with { type: 'json' };
+// 200일선 국면 판정용 나스닥100. TQQQ 자신이 아니라 지수를 쓴다 —
+// 3배 ETF의 MA는 길이에 따라 결과가 심하게 흔들려 과최적화가 된다.
+import qqqRaw from '../data/qqq.json' with { type: 'json' };
 
 // Wilder RSI(period), standard recursive smoothing (TradingView convention)
 function calcRSI(closes, period) {
@@ -138,6 +141,54 @@ export const DEFAULT_SETTINGS = {
   //    5년 창에서는 의도대로지만, 16년 복리 구간에서는 초기에 넘긴 뒤 늘 켜져 있다.
   marketOffEnabled: false, marketOffMinAssets: 300_000_000,
   marketOffTiers: [[10, 0.30], [5, 0.30]], marketOffResetGain: 25, marketOffLockBooster: false,
+  // 추세국면(200일선): 나스닥100 전일 종가가 200일선 아래인 동안 POOL 지출을 멈춘다.
+  // 매도는 하지 않는다 — 순수하게 매수측 규칙이다. 검증: scripts/sweep-regime.mjs
+  //
+  // 왜 매도가 아니라 매수측인가:
+  //   2019-02~2024-02 창의 총자산 고점(19.97억, 2021-12-27)에서 주식비중은 이미
+  //   32.1%였고 현금이 67.9%였다. 그런데도 MDD -79.1%가 났다. 고점부터 저점까지
+  //   부스터가 10.61억을 하락장에 재투입했기 때문이다. 팔 주식이 부족한 게 아니라
+  //   현금을 하락 도중에 다 쓴 것이므로, 세금 22%를 물고 더 파는 것보다 안 쓰게
+  //   막는 쪽이 싸다. (marketOff가 실패한 이유도 같다 — 그쪽 주석 참조)
+  //
+  // 효과와 비용이 단일 사건 하나로 갈린다. 감추지 말 것:
+  //   전체구간 2010-2026  1252.72억/MDD -80.4%  →  1340.48억/MDD -55.7%
+  //   목표창 2019-02~2024-02  15.95억/-79.1%  →  22.25억/-52.6% (IRR 52.9→65.4%)
+  //   개선의 거의 전부가 2022-01-26 한 주다. 그날 부스터가 POOL 11.05억의 60%인
+  //   6.63억을 하락 초입에 쏟아부었고, 이 규칙은 그걸 막는다.
+  //   대가는 코로나형 V자 급락이다. 2015-05~2020-05 창은 12.90 → 10.66억(-17.3%) —
+  //   2020-03-18~04-08의 바닥 매수 3.4억이 잠겨서 200일선 복귀 후 더 비싸게 샀다.
+  //   200일선은 "V자 급락"과 "장기 하락"을 구분하지 못한다. 같은 규칙이 2022를
+  //   구하고 2020을 망친다. 이건 버그가 아니라 이 지표의 한계다.
+  //
+  // 기본 ON이지만 G4(유의성)는 통과하지 못한다. 켠 근거와 못 넘은 지점을 같이 적는다:
+  //   G1 자산하한 통과 / G2 개선 통과(합성 +3.1%, TQQQ +6.6%) / G3 교차검증 통과
+  //   G4 블록 부트스트랩 95% CI [-3.4, 11.8] → 0을 포함. 탈락.
+  //   27년 표본에서 이 규칙이 활약할 국면(POOL이 큰 상태에서의 장기 하락)이 사실상
+  //   2022 한 번뿐이라 표본이 근본적으로 부족하다. 켜고 끄는 건 판단의 영역이다.
+  //   켠 이유는 연속 경로 성적이다 — 실제로 겪는 건 5년 창이 아니라 이어지는 한 경로다.
+  //     실제 TQQQ 2010-2026  1252.72억/-80.4%  →  1358.77억/-55.1%  (+8.5%)
+  //     합성 TQQQ 1999-2026  2233.17억/-98.7%  →  2587.52억/-98.7%  (+15.9%)
+  //   반대로 5년 창(1년 슬라이드) 23개로 세면 합계 -2.0%, 중앙값 -0.2%, 7승 12패다.
+  //   2022가 없는 창에서는 일관되게 진다(2016-02창 -15.9%, 2017-02창 -15.4%).
+  //   평시에 조금씩 내고 10년에 한 번 크게 받는 보험이라고 보는 게 정확하다.
+  //   MDD 평균 개선은 TQQQ 46창 +6.9%p, 합성 90창 +3.7%p로 일관되게 플러스다.
+  //
+  //   regimeMaLen: 지수 이동평균 기간. 200에 맞춰 깎은 값이 아니다 — MDD 개선폭이
+  //     100~250 전 구간에서 TQQQ +6.9~8.7%p / 합성 +3.7~4.7%p로 평탄하다(200은 그
+  //     고원 안이고 봉우리가 아니다). 300에서 무너지는데, 2022-01-26을 놓치기 때문이다.
+  //   regimeDwellDays: 200일선 아래 연속 거래일이 이 값 이상이면 잠금(1=이탈 즉시).
+  //     ※ 고원이 없다. 1~4는 평평하지만 5에서 절벽이다(TQQQ 평균 +6.7% → -4.4%).
+  //       2022-01-26 매수가 이탈 3거래일째라 D≥5면 그 한 주를 놓치기 때문이다.
+  //       "며칠 기다린다"는 아이디어는 데이터가 기각했다. 1로 둘 것.
+  //   regimeBoostPct: 잠긴 동안 부스터가 걸린 주의 POOL 재투자 비율(평상시 60%).
+  //     0/6/12/20/30/45%가 단조롭게 0%에서 최선이다. 중간값을 쓸 이유가 없다.
+  //   regimePoolStop: 잠긴 동안 평상시 5% 재투자도 멈출지. 주간 적립금은 그대로 간다.
+  //   regimeAccelWeeks: 200일선 복귀 후 이만큼의 주를 ratioPct로 되돌린다.
+  //     ※ 0이 정답이다. 켜면 순손해다(TQQQ 평균 +6.6% → -4.9%). 2022년에만 가짜
+  //       복귀가 4번 있었고, 가속은 그때마다 60%로 데드캣 바운스를 사들인다.
+  regimeEnabled: true, regimeMaLen: 200, regimeDwellDays: 1,
+  regimeBoostPct: 0, regimePoolStop: true, regimeAccelWeeks: 0,
   // 양도세: 일반 해외주식 계좌 기준. 연간 실현손익 합산 → 250만원 기본공제 → 22%(지방세 포함),
   // 이듬해 5월 납부. 매도가 잦은 전략일수록 세후 성과가 크게 달라지므로 기본 ON.
   taxEnabled: true,
@@ -167,6 +218,32 @@ function getRollMaxArr(lookback, data = TQQQ_DATA) {
   const ind = getIndicators(data);
   if (!ind.rollMax[lookback]) ind.rollMax[lookback] = calcRollMax(ind.closes, lookback);
   return ind.rollMax[lookback];
+}
+
+// 날짜별 "나스닥100이 200일선 아래에 연속으로 며칠 있었나".
+// 전일 확정 종가로만 판정한다 — 당일 종가로 그날 매매를 정하면 미래를 쓰는 셈이다.
+// 위로 올라오면 0으로 리셋된다.
+const _dwellCache = new Map();
+function getDwellByDate(maLen) {
+  const hit = _dwellCache.get(maLen);
+  if (hit) return hit;
+  const closes = qqqRaw.map(([, p]) => p);
+  const ma = new Array(closes.length).fill(NaN);
+  let sum = 0;
+  for (let i = 0; i < closes.length; i++) {
+    sum += closes[i];
+    if (i >= maLen) sum -= closes[i - maLen];
+    if (i >= maLen - 1) ma[i] = sum / maLen;
+  }
+  const m = new Map();
+  let run = 0;
+  for (let i = 1; i < qqqRaw.length; i++) {
+    if (isNaN(ma[i - 1])) continue;
+    run = closes[i - 1] < ma[i - 1] ? run + 1 : 0;
+    m.set(qqqRaw[i][0], run);
+  }
+  _dwellCache.set(maLen, m);
+  return m;
 }
 
 function isWednesday(dateStr) {
@@ -254,6 +331,17 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
     ? [...(booster.throttleTiers ?? DEFAULT_SETTINGS.throttleTiers)].sort((a, b) => a[0] - b[0])
     : null;
 
+  const regimeEnabled = !!booster.regimeEnabled;
+  const dwellByDate = regimeEnabled
+    ? getDwellByDate(booster.regimeMaLen ?? DEFAULT_SETTINGS.regimeMaLen) : null;
+  const regimeDwellDays = booster.regimeDwellDays ?? DEFAULT_SETTINGS.regimeDwellDays;
+  const regimeBoostFrac = (booster.regimeBoostPct ?? DEFAULT_SETTINGS.regimeBoostPct) / 100;
+  const regimePoolStop = booster.regimePoolStop ?? DEFAULT_SETTINGS.regimePoolStop;
+  const regimeAccelWeeks = booster.regimeAccelWeeks ?? DEFAULT_SETTINGS.regimeAccelWeeks;
+  // 가속 재진입 비율은 부스터 on/off와 무관하게 ratioPct를 쓴다.
+  const accelFrac = (booster.ratioPct ?? DEFAULT_SETTINGS.ratioPct) / 100;
+  let dwell = 0, wasLocked = false, accelLeft = 0, lockedWeeks = 0, accelWeeks = 0;
+
   let shares = 0, avgCost = 0, pool = 0, totalIn = 0;
   let cooldown = 0, sellNo = 0, started = false;
   let boostedWeeks = 0, totalWeeks = 0, throttledWeeks = 0;
@@ -270,6 +358,14 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
     const rsi = _rsiArr[i];
     const disp = _dispArr[i];
     const rollMax = rollMaxArr ? rollMaxArr[i] : NaN;
+
+    // QQQ 휴장일 등으로 날짜가 안 맞으면 직전 값을 이어 쓴다.
+    if (dwellByDate) dwell = dwellByDate.get(date) ?? dwell;
+    const locked = regimeEnabled && dwell >= regimeDwellDays;
+    if (regimeEnabled) {
+      if (wasLocked && !locked) accelLeft = regimeAccelWeeks;
+      wasLocked = locked;
+    }
 
     if (!started) {
       // Day 0: lump-sum initial buy
@@ -370,6 +466,18 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
           for (const [thr, pct] of throttleTiers) if (rsi >= thr) poolRatio = pct / 100;
           if (poolRatio < BASE_POOL_RATIO) throttledWeeks++;
         }
+        // 200일선 장기 이탈 중: POOL 소진 속도를 낮춘다. 주간 적립금은 그대로 들어간다.
+        // 해제 직후 regimeAccelWeeks 동안은 눌러둔 POOL을 부스터 비율로 되돌린다.
+        if (locked) {
+          poolRatio = wasBoosted ? Math.min(poolRatio, regimeBoostFrac)
+            : regimePoolStop ? 0 : poolRatio;
+          lockedWeeks++;
+        } else if (accelLeft > 0) {
+          poolRatio = Math.max(poolRatio, accelFrac);
+          accelLeft--;
+          accelWeeks++;
+        }
+
         const boost = pool * poolRatio;
         if (wasBoosted && boost > 0) {
           boostTrades.push({
@@ -403,7 +511,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
     const boostCond = boostFires(priceUSD, rollMax, rsi);
     // avgCost/gainPct는 원화 평단가와 그 대비 수익률. 마켓오프 규칙과 툴팁이 쓴다.
     const gainPct = avgCost > 0 ? (price - avgCost) / avgCost * 100 : NaN;
-    daily.push({ date, priceUSD, rsi, disp, stockValue, pool, total, totalIn, boostCond, avgCost, gainPct });
+    daily.push({ date, priceUSD, rsi, disp, stockValue, pool, total, totalIn, boostCond, avgCost, gainPct, regimeLocked: locked });
   }
 
   if (!daily.length) throw new Error('백테스트 데이터가 없습니다');
@@ -442,6 +550,8 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
     boostedWeeks,
     throttledWeeks,
     totalWeeks,
+    lockedWeeks,
+    accelWeeks,
   };
 
   return { daily, trades, boostTrades, marketOffTrades, stats };
@@ -517,6 +627,28 @@ export function throttleFirstTier(settings = DEFAULT_SETTINGS) {
   if (!settings.throttleEnabled) return null;
   const tiers = [...(settings.throttleTiers ?? DEFAULT_SETTINGS.throttleTiers)].sort((a, b) => a[0] - b[0]);
   return tiers[0] ?? null;
+}
+
+// ── 추세국면 상황판: 최신 QQQ 기준 현재 200일선 위/아래 ──────────────────────
+// 백테스트와 같은 판정을 쓴다 — 전일 확정 종가, 같은 dwell 카운터.
+export function getRegimeStatus(settings = DEFAULT_SETTINGS) {
+  const maLen = settings.regimeMaLen ?? DEFAULT_SETTINGS.regimeMaLen;
+  const dwellDays = settings.regimeDwellDays ?? DEFAULT_SETTINGS.regimeDwellDays;
+  const m = getDwellByDate(maLen);
+  const last = qqqRaw[qqqRaw.length - 1];
+  const closes = qqqRaw.map(([, p]) => p);
+  let sum = 0;
+  for (let i = closes.length - maLen; i < closes.length; i++) sum += closes[i];
+  const ma = sum / maLen;
+  const dwell = m.get(last[0]) ?? 0;
+  return {
+    enabled: !!settings.regimeEnabled,
+    date: last[0], close: last[1], ma,
+    gapPct: (last[1] / ma - 1) * 100,
+    above: last[1] > ma,
+    dwell, dwellDays,
+    locked: !!settings.regimeEnabled && dwell >= dwellDays,
+  };
 }
 
 // ── 부스터 상황판: 최신 데이터 기준 현재 부스터 on/off 상태 ──────────────────
