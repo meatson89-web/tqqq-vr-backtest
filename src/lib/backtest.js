@@ -97,6 +97,48 @@ export const DEFAULT_SETTINGS = {
   // 기준을 낮춰서 매도(수익률 25% 기준은 유지), 매도 비율도 relaxSellFrac로 축소.
   // 46개 롤링 구간 스윕 검증값(평균 총자산 +1.8%, 2018-08 미스 케이스 해결)이 기본값.
   relaxEnabled: true, relaxMonths: 7, relaxRsiDrop: 0, relaxDispDrop: 12, relaxSellFrac: 0.05,
+  // 조정예상매도 — 검증 후 기각. 기본 OFF로 두고 근거만 남긴다.
+  //
+  // 문제의식은 옳았다. 횡보·저성장 국면에서는 고정기준(이격도>40 AND RSI>=73)에
+  // 못 닿은 채 -30% 하락을 맞는다. 27년 합성표본 41개 사이클 중 29개가 그런 경우였고
+  // (고점 직전 6개월 수익률 평균 -3.5%, 고점 이격도 -5.5%), 그쪽이 오히려 더 깊었다
+  // — 평균 MDD -54.2% vs 고정기준이 잡은 12개 -44.0%.
+  //
+  // 발동조건 — 아래 셋을 모두 만족하는 날.
+  //   1) 국면: anticipateRegimeMode/N으로 잰 값 <= anticipateRegimeMax
+  //   2) 현금: POOL 비중 <= anticipateCashMax %
+  //   3) 지표: 이격도 >= 국면 예상 고점선 AND RSI >= 국면 예상 고점선 (+margin)
+  //      국면선 = 사이클 고점의 이격도·RSI를 직전 126일 수익률에 회귀한 것.
+  //      회귀는 그 시점까지 -30%에 닿아 확정된 사이클로만 적합한다(미래참조 금지).
+  //
+  // 기각 사유 — scripts/anticipate-*.mjs (약 115개 조합)
+  //  · 요청안 그대로(완화매도 제거 + 조정예상)는 명확히 나빴다.
+  //    5년창 23개 -5.5%(7개선/14악화), 10년창 -12.8%, 전체구간 실제 -37.7%.
+  //    국면선 체류율이 20%(고정기준 1.8%)라 남발된다.
+  //  · 네 곳을 고치면(수익률>=25% 추가, 국면 문턱 20%, 현금조건 해제, 예상선 하한 +20)
+  //    5년창 +0.1%·10년창 +1.7%에 MDD +0.7%p까지 올라온다. 여기까진 그럴듯했다.
+  //  · 그런데 시대 홀드아웃(합성 1999~2010에서 고르고 실제 2010~에서 검증)으로
+  //    국면 정의 45종을 다시 훑으니, 양쪽 다 플러스인 건 ret 126일 <=20% 한 칸뿐이고
+  //    그 주변 5x5 격자의 이웃 24칸이 전부 마이너스였다(<=24%면 -7.2%, 113일이면 -11.5%).
+  //    고원이 아니라 뾰족한 봉우리다. 실제 발동도 16년에 4건(2018·2019·2025·2026)뿐이라
+  //    +1.0%는 근거가 못 된다.
+  //  · 재현되는 건 하나뿐이다 — MDD는 확실히 살 수 있지만(검증 +0.9~1.9%p, 격자 전반에서
+  //    안정적) 언제나 수익률 -6~-16%를 내주고 산다. 공짜로 보였던 한 칸이 우연이었을 뿐
+  //    맞교환 관계 자체는 견고하다. 최적화 문제가 아니라 취향 문제다.
+  //  · 결정적으로 원래 목표를 달성하지 못한다. 큰 폭락의 MDD가 어느 설정에서도
+  //    꿈쩍하지 않았다 — 실제 -80.4%, 합성 -98.7% 그대로다.
+  //
+  // 참고: 대안 국면 정의(180일선 기울기, 기간 고점 대비)는 전부 직전 수익률만 못했다.
+  // 완화매도를 없애는 것 자체도 손해였다(5년창 -0.6%, 10년창 -0.8%). 그래서 유지한다.
+  anticipateEnabled: false,
+  anticipateRegimeMax: 40, anticipateCashMax: 20, anticipateMargin: 0,
+  // 발동조건1을 재는 방식과 기간. 'ret' | 'maslope' | 'highdist'
+  anticipateRegimeMode: 'ret', anticipateRegimeN: 126,
+  // 예상 고점선 하한. 국면이 나쁘면 회귀가 "이동평균선 아래에서 고점" 같은 값을
+  // 내놓아 아무 반등에나 걸린다(실측: 이격도 +5.4%에서 매도). 고점이라 부를 최소선.
+  anticipateDispFloor: 0, anticipateRsiFloor: 0,
+  anticipateSellFrac: 0.30, anticipateMinGain: 0, anticipateCooldown: 21,
+  anticipateMinCycles: 4,
   // 과열 스로틀: 수요일 POOL 재투자 비율(평상시 5%)을 그날 RSI 구간별로 낮춘다.
   // tiers = [[RSI임계, 재투자%], ...] 오름차순. RSI가 넘긴 임계 중 가장 높은 단이 적용된다.
   // 부스터가 켜진 주(고점 대비 급락)에는 적용하지 않는다 — 조건상 겹치지 않는다.
@@ -203,10 +245,120 @@ function getIndicators(data) {
   let ind = _indCache.get(data);
   if (!ind) {
     const closes = data.map(([, c]) => c);
-    ind = { closes, rsi: calcRSI(closes, 14), disp: calcDisparity(closes, 180), rollMax: {} };
+    ind = { closes, rsi: calcRSI(closes, 14), disp: calcDisparity(closes, 180), rollMax: {}, regime: {} };
     _indCache.set(data, ind);
   }
   return ind;
+}
+
+// ── 조정예상매도용 국면선 ────────────────────────────────────────────────
+// 고정 매도기준(이격도>40 AND RSI>=73)은 횡보·저성장 국면에서 영영 안 걸린다.
+// 사이클 고점의 이격도·RSI는 절대 수준이 아니라 직전 상승 속도가 정하기 때문이다.
+// 그래서 "직전 126거래일 수익률"에 대고 회귀한 예상 고점선을 기준으로 쓴다.
+//
+// ★ 회귀는 그 시점까지 -30%에 닿아 이미 확정된 사이클로만 적합한다(미래참조 금지).
+//   고점은 -30%를 맞기 전에는 사이클인지 알 수조차 없다.
+const REGIME_N = 126;
+
+function calcRegimeArr(closes, n = REGIME_N) {
+  return closes.map((c, i) => (i < n ? NaN : (c / closes[i - n] - 1) * 100));
+}
+
+/**
+ * 발동조건1("횡보·저성장")을 재는 방식. 무엇이 국면을 가장 잘 가르는지는
+ * 실측으로 정할 문제라 세 가지를 두고 고를 수 있게 했다.
+ *   ret      직전 n거래일 수익률 %            — 단순하지만 점대점이라 노이즈가 있다
+ *   maslope  180일선 자신의 n거래일 기울기 %   — 추세만 남기고 일간 노이즈를 지운다
+ *   highdist 직전 n거래일 고점 대비 위치 %     — 신고가 행진이면 0, 눌리면 음수
+ * 셋 다 "값이 낮을수록 횡보·약세"라서 게이트는 항상 <= 로 건다.
+ */
+function calcRegimeGate(closes, mode, n) {
+  if (mode === 'maslope') {
+    const ma = new Array(closes.length).fill(NaN);
+    let sum = 0;
+    for (let i = 0; i < closes.length; i++) {
+      sum += closes[i];
+      if (i >= 180) sum -= closes[i - 180];
+      if (i >= 179) ma[i] = sum / 180;
+    }
+    return ma.map((v, i) => (i < 179 + n || isNaN(ma[i - n]) ? NaN : (v / ma[i - n] - 1) * 100));
+  }
+  if (mode === 'highdist') {
+    const out = new Array(closes.length).fill(NaN);
+    for (let i = 0; i < closes.length; i++) {
+      if (i < n) continue;
+      let m = -Infinity;
+      for (let j = i - n; j <= i; j++) if (closes[j] > m) m = closes[j];
+      out[i] = (closes[i] / m - 1) * 100;
+    }
+    return out;
+  }
+  return calcRegimeArr(closes, n);   // 'ret'
+}
+
+/** 하락 th%·반등 rebound%로 방향을 트는 지그재그. 회복을 요구하지 않는다 —
+ *  합성 TQQQ는 닷컴 이후 신고가를 못 내서 회복 기준으로는 사이클이 안 잡힌다. */
+function calcZigzagPeaks(closes, th = 30, rebound = 50) {
+  const out = [];
+  let dir = 'up', ext = closes[0], extIdx = 0;
+  for (let i = 1; i < closes.length; i++) {
+    const c = closes[i];
+    if (dir === 'up') {
+      if (c > ext) { ext = c; extIdx = i; }
+      else if ((c / ext - 1) * 100 <= -th) { out.push({ peakIdx: extIdx, confirmIdx: i }); dir = 'down'; ext = c; extIdx = i; }
+    } else if (c < ext) { ext = c; extIdx = i; }
+    else if ((c / ext - 1) * 100 >= rebound) { dir = 'up'; ext = c; extIdx = i; }
+  }
+  return out;
+}
+
+function fitLine(pts) {
+  const n = pts.length;
+  const mx = pts.reduce((s, p) => s + p.x, 0) / n;
+  const my = pts.reduce((s, p) => s + p.y, 0) / n;
+  const sxx = pts.reduce((s, p) => s + (p.x - mx) ** 2, 0);
+  if (sxx === 0) return null;
+  const b = pts.reduce((s, p) => s + (p.x - mx) * (p.y - my), 0) / sxx;
+  return { a: my - b * mx, b, xmin: Math.min(...pts.map(p => p.x)), xmax: Math.max(...pts.map(p => p.x)) };
+}
+
+/** 인덱스별 워크포워드 예상 고점 이격도·RSI. 확정 사이클이 minCycles 미만이면 NaN. */
+function getRegimeGateArr(data, mode, n) {
+  const ind = getIndicators(data);
+  const key = `gate:${mode}:${n}`;
+  if (!ind.regime[key]) ind.regime[key] = calcRegimeGate(ind.closes, mode, n);
+  return ind.regime[key];
+}
+
+function getRegimeLines(data, minCycles) {
+  const ind = getIndicators(data);
+  const key = 'wf' + minCycles;
+  if (ind.regime[key]) return ind.regime[key];
+  const { closes, rsi, disp } = ind;
+  const reg = calcRegimeArr(closes);
+  const n = closes.length;
+  const predD = new Array(n).fill(NaN), predR = new Array(n).fill(NaN);
+  const sample = calcZigzagPeaks(closes)
+    .filter(c => !isNaN(reg[c.peakIdx]) && !isNaN(disp[c.peakIdx]) && !isNaN(rsi[c.peakIdx]))
+    .map(c => ({ at: c.confirmIdx, x: reg[c.peakIdx], d: disp[c.peakIdx], r: rsi[c.peakIdx] }))
+    .sort((a, b) => a.at - b.at);
+  let k = 0; const pts = [];
+  let fd = null, fr = null;
+  for (let i = 0; i < n; i++) {
+    let dirty = false;
+    while (k < sample.length && sample[k].at <= i) { pts.push(sample[k]); k++; dirty = true; }
+    if (pts.length < minCycles) continue;
+    if (dirty || !fd) {
+      fd = fitLine(pts.map(p => ({ x: p.x, y: p.d })));
+      fr = fitLine(pts.map(p => ({ x: p.x, y: p.r })));
+    }
+    if (!fd || !fr || isNaN(reg[i])) continue;
+    const x = Math.min(fd.xmax, Math.max(fd.xmin, reg[i]));   // 적합 범위 밖은 외삽하지 않는다
+    predD[i] = fd.a + fd.b * x;
+    predR[i] = fr.a + fr.b * x;
+  }
+  ind.regime[key] = { reg, predD, predR };
+  return ind.regime[key];
 }
 
 const _closes = getIndicators(TQQQ_DATA).closes;
@@ -327,6 +479,21 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   // 마켓오프 각 단이 발동했는지. 재무장되면 전부 false로 돌아간다.
   const moFired = new Array(marketOffTiers ? marketOffTiers.length : 0).fill(false);
 
+  const antEnabled = !!booster.anticipateEnabled;
+  const antRegimeMax = booster.anticipateRegimeMax ?? DEFAULT_SETTINGS.anticipateRegimeMax;
+  const antCashMax = booster.anticipateCashMax ?? DEFAULT_SETTINGS.anticipateCashMax;
+  const antMargin = booster.anticipateMargin ?? DEFAULT_SETTINGS.anticipateMargin;
+  const antSellFrac = booster.anticipateSellFrac ?? DEFAULT_SETTINGS.anticipateSellFrac;
+  const antMinGain = booster.anticipateMinGain ?? DEFAULT_SETTINGS.anticipateMinGain;
+  const antCooldown = booster.anticipateCooldown ?? DEFAULT_SETTINGS.anticipateCooldown;
+  const antMinCycles = booster.anticipateMinCycles ?? DEFAULT_SETTINGS.anticipateMinCycles;
+  const antDispFloor = booster.anticipateDispFloor ?? DEFAULT_SETTINGS.anticipateDispFloor;
+  const antRsiFloor = booster.anticipateRsiFloor ?? DEFAULT_SETTINGS.anticipateRsiFloor;
+  const antRegimeMode = booster.anticipateRegimeMode ?? DEFAULT_SETTINGS.anticipateRegimeMode;
+  const antRegimeN = booster.anticipateRegimeN ?? DEFAULT_SETTINGS.anticipateRegimeN;
+  const antLines = antEnabled ? getRegimeLines(data, antMinCycles) : null;
+  const antGate = antEnabled ? getRegimeGateArr(data, antRegimeMode, antRegimeN) : null;
+
   const throttleTiers = booster.throttleEnabled
     ? [...(booster.throttleTiers ?? DEFAULT_SETTINGS.throttleTiers)].sort((a, b) => a[0] - b[0])
     : null;
@@ -350,7 +517,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   let realizedGain = 0, taxPaid = 0, taxDue = 0, taxDueYear = -1;
   let capApplied = 0;           // POOL 비중캡이 실제로 발동한 횟수
   const cashflows = [];         // IRR 계산용 (납입 -, 최종평가 +)
-  const daily = [], trades = [], boostTrades = [], marketOffTrades = [];
+  const daily = [], trades = [], boostTrades = [], marketOffTrades = [], antTrades = [];
 
   for (let i = startIdx; i < sliceEnd; i++) {
     const [date, priceUSD] = data[i];
@@ -423,6 +590,32 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
         sellNo++;
         lastSellIdx = i;
         trades.push({ date, priceUSD, returnPct: ret * 100, rsi, disp, poolAfter: pool, sellNo, relaxed: !normalFire });
+      } else if (antEnabled && shares > 0) {
+        // 조정예상매도 — 고정기준이 안 걸리는 횡보·저성장 국면에서만 작동한다.
+        // 위 else-if 자리이므로 정상 매도가 걸린 날/쿨다운 중에는 아예 검사하지 않는다.
+        const totalNow = shares * price + pool;
+        const cashPct = totalNow > 0 ? (pool / totalNow) * 100 : 0;
+        const pd = Math.max(antLines.predD[i], antDispFloor);
+        const pr = Math.max(antLines.predR[i], antRsiFloor);
+        if (
+          !isNaN(antGate[i]) && antGate[i] <= antRegimeMax &&
+          cashPct <= antCashMax &&
+          !isNaN(pd) && !isNaN(pr) &&
+          !isNaN(disp) && disp >= pd + antMargin &&
+          !isNaN(rsi) && rsi >= pr + antMargin &&
+          ret >= antMinGain
+        ) {
+          const sellShares = shares * antSellFrac;
+          const sellValue = sellShares * price;
+          realizedGain += sellShares * (price - avgCost);
+          shares -= sellShares;
+          pool += sellValue;
+          cooldown = antCooldown;
+          sellNo++;
+          lastSellIdx = i;
+          antTrades.push({ date, priceUSD, returnPct: ret * 100, rsi, disp, predD: pd, predR: pr,
+            regime: antLines.reg[i], gate: antGate[i], cashPct, soldKRW: sellValue, poolAfter: pool });
+        }
       }
 
       // 마켓오프: 수익 쿠션이 얇아지면 단계별로 팔아 POOL로 옮긴다.
@@ -544,6 +737,8 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
     marketOffCount: marketOffTrades.length,
     marketOffSoldKRW: marketOffTrades.reduce((a, t) => a + t.soldKRW, 0),
     relaxedSellCount: trades.filter(t => t.relaxed).length,
+    antCount: antTrades.length,
+    antSoldKRW: antTrades.reduce((a, t) => a + t.soldKRW, 0),
     days,
     startDate: daily[0].date,
     endDate: last.date,
@@ -554,7 +749,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
     accelWeeks,
   };
 
-  return { daily, trades, boostTrades, marketOffTrades, stats };
+  return { daily, trades, boostTrades, marketOffTrades, antTrades, stats };
 }
 
 // 5년(252*5거래일) 창을 1년(252거래일)씩 밀며 만든다.
