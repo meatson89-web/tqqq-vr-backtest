@@ -14,7 +14,9 @@ import { runFinalBacktest, DEFAULT_SETTINGS, TQQQ_DATA } from '../src/lib/backte
 const QLD_DATA = JSON.parse(fs.readFileSync(new URL('../src/data/qld.json', import.meta.url), 'utf8'));
 const SIM_DATA = JSON.parse(fs.readFileSync(new URL('../src/data/tqqq_sim.json', import.meta.url), 'utf8'));
 
-const BASE = { ...DEFAULT_SETTINGS };
+// 기본 설정은 이제 추세국면이 켜져 있다. 개선폭을 재려면 기준선을 명시적으로
+// 꺼야 한다 — 안 그러면 후보와 기준선이 같아져 전부 0.0%로 나온다.
+const BASE = { ...DEFAULT_SETTINGS, regimeEnabled: false };
 const WINDOW = 252 * 5, SLIDE = 63;
 const windowsOf = data => {
   const out = [];
@@ -98,6 +100,39 @@ console.log(HEAD);
 for (const w of [0, 2, 4, 8]) {
   console.log(row(`가속 ${w}주`, { ...ON, regimeDwellDays: 1, regimeAccelWeeks: w }).line);
 }
+
+console.log('\n③-2 해제 확인일수 exitDays — 잠금 진입은 즉시 고정');
+console.log(HEAD);
+for (const e of [1, 2, 3, 5, 8, 10, 15, 20]) {
+  console.log(row(`해제 ${e}일`, { ...ON, regimeExitDays: e }).line);
+}
+
+// 조각 수는 "장기 하락이 몇 번 끊기나"를 직접 센다. 개선폭보다 이쪽이 규칙의
+// 의도(하락 도중 틈에서 부스터가 살아나지 않게)를 더 정확히 보여준다.
+console.log('\n③-3 주요 약세장이 몇 조각으로 갈리나 (조각 1 = 한 덩어리로 잠김)');
+const BEARS = [
+  // [이름, 조각을 셀 구간, 백테스트를 돌릴 창, 데이터]
+  ['닷컴 2000-09~2001-12', '2000-09-01', '2001-12-31', '1999-03-11', '2004-03-15', SIM_DATA],
+  ['금융위기 2008-09~2009-05', '2008-09-01', '2009-05-31', '2004-03-16', '2009-12-31', SIM_DATA],
+  ['횡보 2015-08~2016-07', '2015-08-01', '2016-07-31', '2013-01-02', '2018-01-02', TQQQ_DATA],
+  ['긴축 2022-01~2023-02', '2022-01-01', '2023-02-28', '2019-02-15', '2024-02-16', TQQQ_DATA],
+];
+console.log('해제일수  ' + BEARS.map(x => x[0].split(' ')[0].padStart(10)).join(' '));
+for (const e of [1, 2, 3, 5, 8, 10]) {
+  const cells = BEARS.map(([, sd, ed, ws, we, data]) => {
+    const r = runFinalBacktest(ws, we, { ...BASE, ...ON, regimeExitDays: e }, data);
+    let n = 0, prev = false;
+    for (const d of r.daily) {
+      if (d.date < sd || d.date > ed) continue;
+      if (d.regimeLocked && !prev) n++;
+      prev = d.regimeLocked;
+    }
+    return String(n).padStart(10);
+  });
+  console.log(String(e).padStart(8) + '  ' + cells.join(' '));
+}
+console.log('  ※ 2015-08 횡보장은 어떤 값으로도 한 덩어리가 안 된다 — 시장이 실제로');
+console.log('    선 위아래를 오간 구간이라 쪼개지는 게 맞다. 조각 수 자체가 목표가 아니다.');
 
 console.log('\n④ 평상시 5% 정지 여부');
 console.log(HEAD);

@@ -193,43 +193,64 @@ export const DEFAULT_SETTINGS = {
   //   현금을 하락 도중에 다 쓴 것이므로, 세금 22%를 물고 더 파는 것보다 안 쓰게
   //   막는 쪽이 싸다. (marketOff가 실패한 이유도 같다 — 그쪽 주석 참조)
   //
-  // 효과와 비용이 단일 사건 하나로 갈린다. 감추지 말 것:
-  //   전체구간 2010-2026  1178.96억/MDD -80.4%  →  1278.74억/MDD -55.1%  (2026-08-28 데이터)
-  //   목표창 2019-02~2024-02  15.95억/-79.1%  →  22.25억/-52.6% (IRR 52.9→65.4%)
-  //   개선의 거의 전부가 2022-01-26 한 주다. 그날 부스터가 POOL 11.05억의 60%인
-  //   6.63억을 하락 초입에 쏟아부었고, 이 규칙은 그걸 막는다.
-  //   대가는 코로나형 V자 급락이다. 2015-05~2020-05 창은 12.90 → 10.66억(-17.3%) —
-  //   2020-03-18~04-08의 바닥 매수 3.4억이 잠겨서 200일선 복귀 후 더 비싸게 샀다.
-  //   200일선은 "V자 급락"과 "장기 하락"을 구분하지 못한다. 같은 규칙이 2022를
-  //   구하고 2020을 망친다. 이건 버그가 아니라 이 지표의 한계다.
+  // 성적 (전부 세후, 2026-08-28 데이터):
+  //   전체구간 2010-2026    1178.96억/-80.4%  →  1275.39억/-55.0%  (+8.2%)
+  //   합성 1999-2026        2233.17억/-98.7%  →  2582.20억/-98.7%  (+15.6%)
+  //   목표창 2019-02~2024-02  15.95억/-79.1%  →   20.05억/-48.2%  (IRR 52.9→61.4%)
+  //   5년 창 23개(1년 슬라이드)  합계 -3.6%, 평균 +0.8%, 중앙값 -0.2%, 7승 12패
+  //   MDD 평균 개선          TQQQ 46창 +7.5%p, 합성 90창 +4.1%p (일관되게 플러스)
   //
-  // 기본 ON이지만 G4(유의성)는 통과하지 못한다. 켠 근거와 못 넘은 지점을 같이 적는다:
-  //   G1 자산하한 통과 / G2 개선 통과(합성 +3.1%, TQQQ +6.6%) / G3 교차검증 통과
-  //   G4 블록 부트스트랩 95% CI [-3.4, 11.8] → 0을 포함. 탈락.
+  // 개선의 거의 전부가 2022-01-26 한 주다. 그날 부스터가 POOL 11.05억의 60%인
+  // 6.63억을 하락 초입에 쏟아부었고, 이 규칙은 그걸 막는다. 표본이 사실상 1건이라
+  // G4(유의성)를 넘지 못한다 — 아래 게이트 항목 참조.
+  //
+  // 대가는 코로나형 V자 급락이다. 2015-05~2020-05 창은 12.90 → 10.51억(-18.5%) —
+  // 2020-03~04의 바닥 매수가 잠겨서 200일선 복귀 후 더 비싸게 샀다. 200일선은
+  // "V자 급락"과 "장기 하락"을 구분하지 못한다. 같은 규칙이 2022를 구하고 2020을
+  // 망친다. 버그가 아니라 이 지표의 한계다.
+  //
+  // 기본 ON이지만 G4는 통과하지 못한다. 켠 근거와 못 넘은 지점을 같이 적는다:
+  //   G1 자산하한 통과(중앙 -0.2%, 전체 +8.2%) / G2 개선 통과(합성 +3.0%, TQQQ +7.5%)
+  //   G3 교차검증 통과(QLD -0.6%) / G4 블록 부트스트랩 95% CI [-4.5, 12.7] → 0 포함, 탈락.
   //   27년 표본에서 이 규칙이 활약할 국면(POOL이 큰 상태에서의 장기 하락)이 사실상
   //   2022 한 번뿐이라 표본이 근본적으로 부족하다. 켜고 끄는 건 판단의 영역이다.
   //   켠 이유는 연속 경로 성적이다 — 실제로 겪는 건 5년 창이 아니라 이어지는 한 경로다.
-  //     실제 TQQQ 2010-2026  1178.96억/-80.4%  →  1278.74억/-55.1%  (+8.5%)
-  //     합성 TQQQ 1999-2026  2233.17억/-98.7%  →  2587.52억/-98.7%  (+15.9%)
-  //   반대로 5년 창(1년 슬라이드) 23개로 세면 합계 -2.0%, 중앙값 -0.2%, 7승 12패다.
-  //   2022가 없는 창에서는 일관되게 진다(2016-02창 -15.9%, 2017-02창 -15.4%).
-  //   평시에 조금씩 내고 10년에 한 번 크게 받는 보험이라고 보는 게 정확하다.
-  //   MDD 평균 개선은 TQQQ 46창 +6.9%p, 합성 90창 +3.7%p로 일관되게 플러스다.
+  //   반대로 창 단위로는 2022가 없는 창에서 일관되게 진다(2016-02창 -17.0%,
+  //   2009-03창 -16.4%, 2017-02창 -15.9%). 평시에 조금씩 내고 10년에 한 번 크게
+  //   받는 보험이라고 보는 게 정확하다.
   //
   //   regimeMaLen: 지수 이동평균 기간. 200에 맞춰 깎은 값이 아니다 — MDD 개선폭이
   //     100~250 전 구간에서 TQQQ +6.9~8.7%p / 합성 +3.7~4.7%p로 평탄하다(200은 그
   //     고원 안이고 봉우리가 아니다). 300에서 무너지는데, 2022-01-26을 놓치기 때문이다.
   //   regimeDwellDays: 200일선 아래 연속 거래일이 이 값 이상이면 잠금(1=이탈 즉시).
   //     ※ 고원이 없다. 1~4는 평평하지만 5에서 절벽이다(TQQQ 평균 +6.7% → -4.4%).
-  //       2022-01-26 매수가 이탈 3거래일째라 D≥5면 그 한 주를 놓치기 때문이다.
-  //       "며칠 기다린다"는 아이디어는 데이터가 기각했다. 1로 둘 것.
+  //       2022-01-26 매수가 이탈 3거래일째라 D>=5면 그 한 주를 놓친다. 1로 둘 것.
+  //   regimeExitDays: 200일선 위로 올라온 뒤 이만큼 연속으로 유지돼야 잠금이 풀린다.
+  //     진입은 즉시, 해제는 확인 후 — 비대칭인 이유가 있다. 장기 하락은 200일선을
+  //     여러 번 넘나든다. 2022년 하락 한 덩어리가 즉시해제(=1)로는 6조각으로 쪼개지고
+  //     그 틈(2022-02-02 2일, 2022-03-30 1일)에 수요일이 정확히 2번 낀다. 그 주는
+  //     잠금이 풀려 부스터가 살아 있었다. 실제로는 그날 부스터 조건이 꺼져 있어
+  //     유출이 없었지만, POOL이 10.24억·9.73억이었으니 조건만 맞았으면 6억이
+  //     하락 도중에 나갔다. 운이었지 설계가 아니었다.
+  //     ※ 3이 "2022를 한 덩어리로 만드는 최소값"이다(1→6조각, 2→3조각, 3→1조각).
+  //       3~8이 MDD 개선 +7.5%p로 평탄한 고원이고 수익은 3 이후 단조 감소한다:
+  //         exit 1  1278.74억  2022 6조각    exit 3  1275.39억  1조각  ← 채택
+  //         exit 2  1292.96억  3조각         exit 5  1234.80억  1조각
+  //                                          exit 8  1202.28억  1조각
+  //       3은 1 대비 최종자산 -0.3%로 사실상 공짜인데 쪼개짐을 없애고 목표창 MDD를
+  //       -52.6% → -48.2%로 낮춘다. 더 늘리면 진짜 바닥 매수(2020-03-11 → 04-22)가
+  //       밀려 비싸게 사게 된다 — 그게 exit 5·8에서 수익이 깎이는 이유다.
+  //     ※ 주의: 어떤 값으로도 모든 약세장이 한 덩어리가 되지는 않는다. 2015-08~2016-07
+  //       횡보장은 exit=10에서도 4조각이다. 시장이 실제로 선 위아래를 오간 구간이라
+  //       쪼개지는 게 맞다. 조각 수 자체가 목표가 아니라 "하락 도중 틈에서 부스터가
+  //       터지는 것"을 막는 게 목적이다.
   //   regimeBoostPct: 잠긴 동안 부스터가 걸린 주의 POOL 재투자 비율(평상시 60%).
   //     0/6/12/20/30/45%가 단조롭게 0%에서 최선이다. 중간값을 쓸 이유가 없다.
   //   regimePoolStop: 잠긴 동안 평상시 5% 재투자도 멈출지. 주간 적립금은 그대로 간다.
   //   regimeAccelWeeks: 200일선 복귀 후 이만큼의 주를 ratioPct로 되돌린다.
   //     ※ 0이 정답이다. 켜면 순손해다(TQQQ 평균 +6.6% → -4.9%). 2022년에만 가짜
   //       복귀가 4번 있었고, 가속은 그때마다 60%로 데드캣 바운스를 사들인다.
-  regimeEnabled: true, regimeMaLen: 200, regimeDwellDays: 1,
+  regimeEnabled: true, regimeMaLen: 200, regimeDwellDays: 1, regimeExitDays: 3,
   regimeBoostPct: 0, regimePoolStop: true, regimeAccelWeeks: 0,
   // 양도세: 일반 해외주식 계좌 기준. 연간 실현손익 합산 → 250만원 기본공제 → 22%(지방세 포함),
   // 이듬해 5월 납부. 매도가 잦은 전략일수록 세후 성과가 크게 달라지므로 기본 ON.
@@ -505,9 +526,13 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   const regimeBoostFrac = (booster.regimeBoostPct ?? DEFAULT_SETTINGS.regimeBoostPct) / 100;
   const regimePoolStop = booster.regimePoolStop ?? DEFAULT_SETTINGS.regimePoolStop;
   const regimeAccelWeeks = booster.regimeAccelWeeks ?? DEFAULT_SETTINGS.regimeAccelWeeks;
+  const regimeExitDays = booster.regimeExitDays ?? DEFAULT_SETTINGS.regimeExitDays;
   // 가속 재진입 비율은 부스터 on/off와 무관하게 ratioPct를 쓴다.
   const accelFrac = (booster.ratioPct ?? DEFAULT_SETTINGS.ratioPct) / 100;
   let dwell = 0, wasLocked = false, accelLeft = 0, lockedWeeks = 0, accelWeeks = 0;
+  // 잠금은 상태다. 아래로 내려가면 즉시 켜지고, 위로 올라와도 regimeExitDays 동안
+  // 유지돼야 꺼진다. aboveRun은 연속으로 선 위에 있었던 거래일 수.
+  let lockState = false, aboveRun = 0;
 
   let shares = 0, avgCost = 0, pool = 0, totalIn = 0;
   let cooldown = 0, sellNo = 0, started = false;
@@ -528,7 +553,14 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
 
     // QQQ 휴장일 등으로 날짜가 안 맞으면 직전 값을 이어 쓴다.
     if (dwellByDate) dwell = dwellByDate.get(date) ?? dwell;
-    const locked = regimeEnabled && dwell >= regimeDwellDays;
+    if (dwell >= regimeDwellDays) {
+      lockState = true;
+      aboveRun = 0;
+    } else {
+      aboveRun++;
+      if (aboveRun >= regimeExitDays) lockState = false;
+    }
+    const locked = regimeEnabled && lockState;
     if (regimeEnabled) {
       if (wasLocked && !locked) accelLeft = regimeAccelWeeks;
       wasLocked = locked;
@@ -836,13 +868,23 @@ export function getRegimeStatus(settings = DEFAULT_SETTINGS) {
   for (let i = closes.length - maLen; i < closes.length; i++) sum += closes[i];
   const ma = sum / maLen;
   const dwell = m.get(last[0]) ?? 0;
+  const exitDays = settings.regimeExitDays ?? DEFAULT_SETTINGS.regimeExitDays;
+  // 백테스트 루프와 같은 상태기계를 처음부터 돌려 현재 잠금 상태를 얻는다.
+  // 마지막 날 종가만 봐서는 "위로 올라왔지만 아직 확인일수를 못 채운" 상태를 알 수 없다.
+  let lockState = false, aboveRun = 0;
+  for (const [d] of qqqRaw) {
+    const dw = m.get(d);
+    if (dw === undefined) continue;
+    if (dw >= dwellDays) { lockState = true; aboveRun = 0; }
+    else { aboveRun++; if (aboveRun >= exitDays) lockState = false; }
+  }
   return {
     enabled: !!settings.regimeEnabled,
     date: last[0], close: last[1], ma,
     gapPct: (last[1] / ma - 1) * 100,
     above: last[1] > ma,
-    dwell, dwellDays,
-    locked: !!settings.regimeEnabled && dwell >= dwellDays,
+    dwell, dwellDays, exitDays, aboveRun,
+    locked: !!settings.regimeEnabled && lockState,
   };
 }
 
