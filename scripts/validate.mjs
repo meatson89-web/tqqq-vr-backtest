@@ -29,7 +29,12 @@ const SIM_DATA = JSON.parse(fs.readFileSync(new URL('../src/data/tqqq_sim.json',
 // 현재 기본 설정을 기준선으로 삼는다.
 const BASE = { ...DEFAULT_SETTINGS };
 
+// 주의: BASE는 현재 기본값(lookback 252)이다. 후보를 60일로 두면 "되돌리기"를 재는 것이고,
+// 부호가 음수로 나오는 게 정상이다. 기본값을 바꿀 때는 이 목록의 기준도 함께 손봐야 한다.
 const CANDIDATES = [
+  { label: '부스터 고점 60일(되돌리기)', settings: { lookback: 60 } },
+  { label: '부스터 고점 120일', settings: { lookback: 120 } },
+  { label: '부스터 고점 350일', settings: { lookback: 350 } },
   { label: '완화매도 끄기', settings: { relaxEnabled: false } },
   { label: '부스터 끄기', settings: { enabled: false } },
   { label: '부스터 낙폭 -25%', settings: { drawdownPct: 25 } },

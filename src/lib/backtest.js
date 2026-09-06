@@ -88,7 +88,22 @@ export const DEFAULT_SETTINGS = {
   //   필터 OFF — 23창 평균 -0.3%, 최악 창 -9.3%, 나빠진 창 8개 (옛 결론이 나온 조건)
   // MDD 평균 -66.6% → -66.9%, 잔존율 중앙 83% 불변. 즉 100%는 추세국면 필터와
   // 세트로만 안전하다. 필터를 끄면 60으로 되돌려야 한다.
-  enabled: true, lookback: 60, drawdownPct: 30, ratioPct: 100,
+  // 2026-09-06: lookback 60→252 (부스터 고점 기준 1년). 60일 고점은 긴 침체의
+  // 바닥 다지기에서 리셋되어 -30% 조건이 영영 발동 불가가 되지만, 1년 고점은 남아
+  // 있어 추세국면 잠금 해제 직후 복구 초입에서 풀을 쏜다. 사건 3건: 2009 GFC 복구
+  // 재진입(23창 +17.31%), 2023-02-08 재진입(전체구간 +18.4%), 2008-05-07 소액 칼날
+  // (새 창 실행 한정 0.03~0.06억). 23창 5승/3패/15무, 평균 +1.94%, 최악 -4.77%,
+  // MDD·내 구간 불변. 단 G4 부트스트랩 95% CI는 0을 포함(사건 집중형 변경).
+  // 되돌리려면 lookback: 60 한 줄. 상세: '전략 변경 · 2026-09-06 · 부스터 고점 1년.txt'
+  enabled: true, lookback: 252, drawdownPct: 30, ratioPct: 100,
+  // 부스터 확인 주 수(실험, 기본 1=기존): N주 연속으로 발동 조건이 선 수요일에
+  // 유지된 경우에만 ratioPct로 올린다. 미확정 주는 평상시 재투자율로 산다.
+  // boostConfirmMode 'unlocked'는 잠금(추세국면/선행) 상태의 주는 연속 카운트에
+  // 넣지 않는다 — 잠금이 풀린 뒤 첫 주는 확인되지 않은 것으로 본다. 'any'는
+  // 잠금과 무관하게 발동 조건만 센다.
+  boostConfirmWeeks: 1, boostConfirmMode: 'unlocked',
+  // 평상시(비부스터) 주간 POOL 재투자 비율 % (기존 고정 5%)
+  poolRatioPct: 5,
   // 부스터 AND 조건(선택). null이면 낙폭만 본다. 값을 주면 "그날 RSI ≤ 이 값"까지
   // 만족해야 부스터가 켜진다 — 낙폭은 컸지만 이미 반등이 시작된 주를 걸러내려는 것.
   boostRsiMax: null,
@@ -258,6 +273,15 @@ export const DEFAULT_SETTINGS = {
   //       복귀가 4번 있었고, 가속은 그때마다 ratioPct로 데드캣 바운스를 사들인다.
   regimeEnabled: true, regimeMaLen: 200, regimeDwellDays: 1, regimeExitDays: 3,
   regimeBoostPct: 0, regimePoolStop: true, regimeAccelWeeks: 0,
+  // 선행 잠금(실험, 기본 OFF): 200일선 잠금은 후행 지표라 "선에서 멀리 떨어진
+  // 고점에서의 첫 급락"(2000-01)과 "선 언저리 톱질"(2018-10)을 못 잡는다.
+  // 이 규칙은 basis 시계열(tqqq|qqq)이 leadLockLookback일 고점 대비 leadLockPct%
+  // 이상 빠진 동안 POOL 지출을 막는다 — 200일선과 무관하게 먼저 걸리는 쪽이다.
+  // 해제는 leadLockExitDays일 연속으로 임계 위에 있어야 한다.
+  // tqqq 기준 -20%는 부스터(-30%)보다 3배 레버리지만큼 먼저 걸린다.
+  leadLockEnabled: false, leadLockBasis: 'tqqq', leadLockLookback: 60, leadLockPct: 20, leadLockExitDays: 3,
+  // 매도 조건 결합 방식(실험, 기본 'AND'): 'AND' | 'OR' | 'RSI' | 'DISP'
+  sellMode: 'AND',
   // 양도세: 일반 해외주식 계좌 기준. 연간 실현손익 합산 → 250만원 기본공제 → 22%(지방세 포함),
   // 이듬해 5월 납부. 매도가 잦은 전략일수록 세후 성과가 크게 달라지므로 기본 ON.
   taxEnabled: true,
@@ -429,6 +453,23 @@ function isWednesday(dateStr) {
   return new Date(dateStr + 'T00:00:00Z').getUTCDay() === 3;
 }
 
+// QQQ 종가를 백테스트 대상 데이터의 날짜에 맞춘 배열. 그 날짜에 QQQ 값이 없으면
+// 직전 값을 이어 쓴다(둘은 사실상 같은 거래일이지만 수집원에 따라 틈이 있을 수 있다).
+const _qqqAlignCache = new Map();
+function alignQqqToData(data) {
+  let a = _qqqAlignCache.get(data);
+  if (a) return a;
+  const qm = new Map(qqqRaw.map(([d, p]) => [d, p]));
+  let last = NaN;
+  a = data.map(([d]) => {
+    const p = qm.get(d);
+    if (p !== undefined) last = p;
+    return last;
+  });
+  _qqqAlignCache.set(data, a);
+  return a;
+}
+
 const TRADING_DAYS_PER_MONTH = 21;
 
 // 수익실현 매도 임계. settings.sellRsi로 옮겨 화면·검증 스크립트에서 조정 가능하다.
@@ -540,9 +581,24 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   // 유지돼야 꺼진다. aboveRun은 연속으로 선 위에 있었던 거래일 수.
   let lockState = false, aboveRun = 0;
 
+  // ── 선행 잠금(실험): 200일선과 무관하게 "N일 고점 대비 -X%"로 걸리는 잠금 ──
+  const leadLockEnabled = !!booster.leadLockEnabled;
+  const leadLockBasis = booster.leadLockBasis ?? DEFAULT_SETTINGS.leadLockBasis;
+  const leadLockLookback = booster.leadLockLookback ?? DEFAULT_SETTINGS.leadLockLookback;
+  const leadLockPct = booster.leadLockPct ?? DEFAULT_SETTINGS.leadLockPct;
+  const leadLockExitDays = booster.leadLockExitDays ?? DEFAULT_SETTINGS.leadLockExitDays;
+  const leadBasisCloses = leadLockEnabled
+    ? (leadLockBasis === 'qqq' ? alignQqqToData(data) : data.map(([, p]) => p))
+    : null;
+  const leadMaxArr = leadLockEnabled ? calcRollMax(leadBasisCloses, leadLockLookback) : null;
+  // 임계는 "당일 종가" 기준으로 판정한다 — 부스터 발동도 당일 종가 기준이라 같은
+  // 시점 정보를 쓰는 셈이다(체결이 당일 종가로 일어나므로 미래참조가 아니다).
+  let leadLockState = false, leadAboveRun = 0;
+
   let shares = 0, avgCost = 0, pool = 0, totalIn = 0;
   let cooldown = 0, sellNo = 0, started = false;
   let boostedWeeks = 0, totalWeeks = 0, throttledWeeks = 0;
+  let boostStreak = 0;   // 연속 발동 확인용 (boostConfirmWeeks)
   let lastSellIdx = startIdx;
   // 양도세 누적: 당해 실현손익 → 연말에 세액 확정 → 이듬해 5월 납부
   let realizedGain = 0, taxPaid = 0, taxDue = 0, taxDueYear = -1;
@@ -566,7 +622,20 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
       aboveRun++;
       if (aboveRun >= regimeExitDays) lockState = false;
     }
-    const locked = regimeEnabled && lockState;
+    if (leadLockEnabled) {
+      const lm = leadMaxArr[i];
+      if (!isNaN(lm)) {
+        const thr = lm * (1 - leadLockPct / 100);
+        if (leadBasisCloses[i] <= thr) {
+          leadLockState = true;
+          leadAboveRun = 0;
+        } else {
+          leadAboveRun++;
+          if (leadAboveRun >= leadLockExitDays) leadLockState = false;
+        }
+      }
+    }
+    const locked = (regimeEnabled && lockState) || leadLockState;
     if (regimeEnabled) {
       if (wasLocked && !locked) accelLeft = regimeAccelWeeks;
       wasLocked = locked;
@@ -605,19 +674,22 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
       const ret = avgCost > 0 ? (price - avgCost) / avgCost : 0;
       const relaxActive = relaxEnabled && (i - lastSellIdx >= relaxDays);
       const effRsi = relaxActive ? SELL_RSI - relaxRsiDrop : SELL_RSI;
-      const effDisp = relaxActive ? 40 - relaxDispDrop : 40;
+      const effDisp = relaxActive ? SELL_DISP - relaxDispDrop : SELL_DISP;
       // Cooldown: decrement or check sell (matches Python if/else structure)
+      const sellMode = booster.sellMode ?? DEFAULT_SETTINGS.sellMode;
+      const rsiOk = !isNaN(rsi) && rsi >= effRsi;
+      const dispOk = !isNaN(disp) && disp > effDisp;
+      const sellCond = sellMode === 'AND' ? (rsiOk && dispOk)
+        : sellMode === 'OR' ? (rsiOk || dispOk)
+        : sellMode === 'RSI' ? rsiOk
+        : dispOk;
       if (cooldown > 0) {
         cooldown--;
-      } else if (
-        !isNaN(rsi) && rsi >= effRsi &&
-        !isNaN(disp) && disp > effDisp &&
-        ret >= 0.25
-      ) {
+      } else if (sellCond && ret >= 0.25) {
         // A sell that would have fired at the normal RSI/이격도 bar anyway keeps
         // the normal 70% sell size; only a sell that needed the relaxed bar
         // uses the smaller relaxSellFrac.
-        const normalFire = rsi >= SELL_RSI && disp > SELL_DISP;
+        const normalFire = !relaxActive || (rsi >= SELL_RSI && disp > SELL_DISP);
         const sellFrac = normalFire ? 0.70 : relaxSellFrac;
         const sellShares = shares * sellFrac;
         const sellValue = sellShares * price;
@@ -687,15 +759,24 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
       // Weekly buy on Wednesdays: 적립금 + pool * 재투자비율(기본 5%, 부스터 조건 충족 시 상향)
       if (isWednesday(date)) {
         totalWeeks++;
-        let poolRatio = BASE_POOL_RATIO;
+        const poolRatioPct = booster.poolRatioPct ?? DEFAULT_SETTINGS.poolRatioPct;
+        let poolRatio = poolRatioPct / 100;
         let wasBoosted = false;
         if (boostFires(priceUSD, rollMax, rsi)) {
-          poolRatio = boostFrac;
           boostedWeeks++;
-          wasBoosted = true;
-        } else if (throttleTiers && !isNaN(rsi)) {
-          for (const [thr, pct] of throttleTiers) if (rsi >= thr) poolRatio = pct / 100;
-          if (poolRatio < BASE_POOL_RATIO) throttledWeeks++;
+          const confirm = booster.boostConfirmWeeks ?? DEFAULT_SETTINGS.boostConfirmWeeks;
+          const confirmMode = booster.boostConfirmMode ?? DEFAULT_SETTINGS.boostConfirmMode;
+          if (confirmMode === 'any' || !locked) boostStreak++; else boostStreak = 0;
+          if (confirm <= 1 || boostStreak >= confirm) {
+            poolRatio = boostFrac;
+            wasBoosted = true;
+          }
+        } else {
+          boostStreak = 0;
+          if (throttleTiers && !isNaN(rsi)) {
+            for (const [thr, pct] of throttleTiers) if (rsi >= thr) poolRatio = pct / 100;
+            if (poolRatio < poolRatioPct / 100) throttledWeeks++;
+          }
         }
         // 200일선 장기 이탈 중: POOL 소진 속도를 낮춘다. 주간 적립금은 그대로 들어간다.
         // 해제 직후 regimeAccelWeeks 동안은 눌러둔 POOL을 부스터 비율로 되돌린다.
