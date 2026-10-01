@@ -139,12 +139,6 @@ function StrategyInfo() {
         <p>
           <b>POOL 재투자</b> — 매도로 확보한 현금은 POOL에 쌓이고, 매주 수요일 POOL 잔고의 5%가
           정액 적립금과 함께 재투자됩니다(그날 RSI가 70 이상이면 아래 <i>과열 스로틀</i>에 따라 0%).
-          단 총자산이 설정한 비중캡 기준 이하일 때 POOL 비중이
-          10%를 넘으면, 초과분을 즉시 매수해 현금이 과도하게 쌓이지 않게 합니다.
-          <b> 주의</b> — 이 캡은 총자산이 기준 금액을 <i>넘어서는 순간부터 영구히 꺼집니다.</i>{' '}
-          초기 투입금 1억으로 2010년부터 돌리면 한 번도 발동하지 않습니다(상단 "POOL 비중캡"
-          항목에서 실제 발동 횟수를 확인하세요). 자산이 커진 뒤에는 없는 기능이나 마찬가지이므로,
-          이 값을 조정해 결과가 바뀐다면 그 구간에서만 유효한 것입니다.
         </p>
         <p>
           <b>양도소득세</b> — 일반 해외주식 계좌 기준으로 연간 실현손익을 합산해 250만원을 공제한
@@ -329,7 +323,7 @@ function StrategyInfo() {
           비중 상한·자산배분 차원이어야 합니다.
         </p>
         <p>
-          <b>파라미터</b> — 초기 투입금, 수요일 적립금, POOL 비중캡 기준, 부스터 조건은 상단
+          <b>파라미터</b> — 초기 투입금, 수요일 적립금, 부스터 조건은 상단
           파라미터 패널에서 직접 바꾸고 "적용"을 누르면 모든 백테스트(롤링 윈도우 + 직접 기간 설정)에
           한번에 반영됩니다. 매도 RSI 임계도 파라미터로 열어 두었습니다.
           나머지 매도 조건(이격도 40%·수익률 25%·매도비율 70%·쿨다운 10일)과
@@ -362,12 +356,6 @@ function numField(label, value, onChange, opts = {}) {
         />
         <em>{opts.unit}</em>
       </span>
-      {/* preset = [공격형(현재 기본값), 보수형(D)] 값 표기. 표기만 하고 자동 적용은 안 한다. */}
-      {opts.preset && (
-        <span className="param-preset">
-          공격 <b>{opts.preset[0]}</b> · 보수 <b className={opts.preset[0] === opts.preset[1] ? '' : 'diff'}>{opts.preset[1]}</b>
-        </span>
-      )}
     </label>
   )
 }
@@ -377,19 +365,10 @@ function ParametersPanel({ draft, onDraftChange, onApply, dirty }) {
   return (
     <div className="rules-panel param-panel">
       <h3 className="panel-heading">파라미터 설정</h3>
-      {/* 각 칸 아래의 "공격 / 보수"는 표기일 뿐 자동 적용되지 않는다. 직접 입력하고 적용을 누른다.
-          보수형 근거: scripts/design-defensive3.mjs(3,815설정 전수), scripts/compare-D.mjs(23창 비교) */}
-      <p className="param-preset-note">
-        각 칸 아래 <b>공격</b>은 현재 기본값, <b>보수</b>는 낙폭을 줄인 방어형 설정입니다. 표기만 되며 자동 적용되지 않으니
-        직접 입력하고 <b>적용</b>을 누르세요. 보수형은 23창 기준 총자산 MDD 평균 -69.8% → -65.9%(개선 15창·악화 0창),
-        총자산이 5억을 넘긴 뒤의 MDD는 평균 -49.3% → -36.4%로 줄고 반토막(-50%) 넘는 창이 8/16 → 3/16이 됩니다.
-        대가는 총자산 중앙 0.90배(실제 12창 0.83배)입니다.
-      </p>
       <div className="param-grid">
         {numField('초기 투입금', draft.initialKRW / 1e8, v => set('initialKRW', v * 1e8), { step: 0.1, unit: '억원' })}
         {numField('수요일 적립금', draft.weeklyKRW / 10000, v => set('weeklyKRW', v * 10000), { step: 5, unit: '만원' })}
-        {numField('POOL 비중캡 기준', draft.poolCapKRW / 1e8, v => set('poolCapKRW', v * 1e8), { step: 0.1, unit: '억원' })}
-        {numField('매도 RSI 임계', draft.sellRsi, v => set('sellRsi', v), { min: 50, max: 100, step: 1, unit: 'RSI', preset: [73, 70] })}
+        {numField('매도 RSI 임계', draft.sellRsi, v => set('sellRsi', v), { min: 50, max: 100, step: 1, unit: 'RSI' })}
       </div>
       <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'left', margin: '4px 0 0' }}>
         매도 RSI를 올리면 덜 팔고, 내리면 자주 팝니다. 90 이상이면 매도가 아예 안 걸려 순수 적립식이 됩니다.
@@ -408,9 +387,9 @@ function ParametersPanel({ draft, onDraftChange, onApply, dirty }) {
         POOL 부스터 사용 (고점 대비 급락 시 재투자 비율 상향)
       </label>
       <div className="param-grid">
-        {numField('기준 고점 기간', draft.lookback, v => set('lookback', v), { min: 5, max: 400, step: 1, unit: '거래일', disabled: !draft.enabled, preset: [252, 60] })}
-        {numField('하락 임계치', draft.drawdownPct, v => set('drawdownPct', v), { min: 5, max: 70, step: 1, unit: '%', disabled: !draft.enabled, preset: [30, 50] })}
-        {numField('재투자 비율', draft.ratioPct, v => set('ratioPct', v), { min: 5, max: 200, step: 1, unit: '%', disabled: !draft.enabled, preset: [100, 60] })}
+        {numField('기준 고점 기간', draft.lookback, v => set('lookback', v), { min: 5, max: 400, step: 1, unit: '거래일', disabled: !draft.enabled })}
+        {numField('하락 임계치', draft.drawdownPct, v => set('drawdownPct', v), { min: 5, max: 70, step: 1, unit: '%', disabled: !draft.enabled })}
+        {numField('재투자 비율', draft.ratioPct, v => set('ratioPct', v), { min: 5, max: 200, step: 1, unit: '%', disabled: !draft.enabled })}
       </div>
 
       <div className="param-divider" />
@@ -424,10 +403,10 @@ function ParametersPanel({ draft, onDraftChange, onApply, dirty }) {
         완화매도 사용 (오래 매도 못하면 RSI·이격도 기준 낮춰서 매도)
       </label>
       <div className="param-grid">
-        {numField('미매도 기준', draft.relaxMonths, v => set('relaxMonths', v), { min: 1, max: 24, step: 1, unit: '개월', disabled: !draft.relaxEnabled, preset: [7, 5] })}
-        {numField('RSI 완화폭', draft.relaxRsiDrop, v => set('relaxRsiDrop', v), { min: 0, max: 40, step: 1, unit: 'p', disabled: !draft.relaxEnabled, preset: [0, 0] })}
-        {numField('이격도 완화폭', draft.relaxDispDrop, v => set('relaxDispDrop', v), { min: 0, max: 40, step: 1, unit: 'p', disabled: !draft.relaxEnabled, preset: [12, 20] })}
-        {numField('완화매도 비율', draft.relaxSellFrac * 100, v => set('relaxSellFrac', v / 100), { min: 1, max: 70, step: 1, unit: '%', disabled: !draft.relaxEnabled, preset: [5, 40] })}
+        {numField('미매도 기준', draft.relaxMonths, v => set('relaxMonths', v), { min: 1, max: 24, step: 1, unit: '개월', disabled: !draft.relaxEnabled })}
+        {numField('RSI 완화폭', draft.relaxRsiDrop, v => set('relaxRsiDrop', v), { min: 0, max: 40, step: 1, unit: 'p', disabled: !draft.relaxEnabled })}
+        {numField('이격도 완화폭', draft.relaxDispDrop, v => set('relaxDispDrop', v), { min: 0, max: 40, step: 1, unit: 'p', disabled: !draft.relaxEnabled })}
+        {numField('완화매도 비율', draft.relaxSellFrac * 100, v => set('relaxSellFrac', v / 100), { min: 1, max: 70, step: 1, unit: '%', disabled: !draft.relaxEnabled })}
       </div>
 
       <div className="param-divider" />
@@ -448,8 +427,8 @@ function ParametersPanel({ draft, onDraftChange, onApply, dirty }) {
         MA 기간은 100~250 전 구간에서 결과가 평탄해 200에 맞춰 깎은 값이 아닙니다.
       </p>
       <div className="param-grid">
-        {numField('국면 MA 기간', draft.regimeMaLen, v => set('regimeMaLen', v), { min: 50, max: 300, step: 10, unit: '일', disabled: !draft.regimeEnabled, preset: [200, 200] })}
-        {numField('해제 확인일수', draft.regimeExitDays, v => set('regimeExitDays', v), { min: 1, max: 30, step: 1, unit: '거래일', disabled: !draft.regimeEnabled, preset: [3, 5] })}
+        {numField('국면 MA 기간', draft.regimeMaLen, v => set('regimeMaLen', v), { min: 50, max: 300, step: 10, unit: '일', disabled: !draft.regimeEnabled })}
+        {numField('해제 확인일수', draft.regimeExitDays, v => set('regimeExitDays', v), { min: 1, max: 30, step: 1, unit: '거래일', disabled: !draft.regimeEnabled })}
       </div>
       <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'left', margin: '4px 0 0' }}>
         해제 확인일수 1이면 하루만 선 위로 올라와도 잠금이 풀려 2022년 하락이 6조각으로 쪼개집니다.
@@ -971,12 +950,6 @@ function BacktestDetail({ window: win, settings }) {
             <span className="value">{fmtB(stats.taxPaid)}</span>
           </div>
         )}
-        <div className="stat-item">
-          <span className="label">POOL 비중캡</span>
-          <span className="value" style={stats.capApplied === 0 ? { color: '#f59e0b' } : undefined}>
-            {stats.capApplied === 0 ? '미발동' : `${stats.capApplied}회`}
-          </span>
-        </div>
         {settings.enabled && (
           <div className="stat-item">
             <span className="label">부스터 발동</span>

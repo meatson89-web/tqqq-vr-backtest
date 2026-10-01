@@ -76,7 +76,6 @@ export const SIM_START = SIM_DATA[0][0];
 //  - 부스터: 60거래일 고점 대비 -30%↓ 시 주간 POOL 재투자 비율을 5%→100%로 상향
 //  - initialKRW: 시작일 일시 매수 초기 투입금 (기본 1억)
 //  - weeklyKRW: 수요일 정액 적립금 (기본 85만원)
-//  - poolCapKRW: 총자산이 이 금액 이하일 때 POOL 비중 10% 캡 적용 기준 (기본 2억)
 export const DEFAULT_SETTINGS = {
   // ratioPct 60 → 100: 부스터 강도. 25%는 발동해도 바닥에서 현금이 절반 남았고
   // (2020-03-20 POOL 비중 55.3%), 60%면 18.5%까지 내려간다. 25→100%가 단조 개선이다.
@@ -107,7 +106,7 @@ export const DEFAULT_SETTINGS = {
   // 부스터 AND 조건(선택). null이면 낙폭만 본다. 값을 주면 "그날 RSI ≤ 이 값"까지
   // 만족해야 부스터가 켜진다 — 낙폭은 컸지만 이미 반등이 시작된 주를 걸러내려는 것.
   boostRsiMax: null,
-  initialKRW: 100_000_000, weeklyKRW: 850_000, poolCapKRW: 200_000_000,
+  initialKRW: 100_000_000, weeklyKRW: 850_000,
   // 수익실현 매도 RSI 임계. 70 → 73으로 올렸다.
   // 71~75가 연속으로 개선되는 "고원"이지 단일 봉우리가 아니다. 70에서만 걸리던
   // 매도 12건 중 7건은 이후 낙폭이 -13% 이내여서 세금만 내고 끝났을 거래였다.
@@ -515,7 +514,6 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   const boostFrac = boostActive ? booster.ratioPct / 100 : 0;
   const boostDrawdownFrac = boostActive ? booster.drawdownPct / 100 : 0;
   const weeklyKRW = booster.weeklyKRW ?? DEFAULT_SETTINGS.weeklyKRW;
-  const poolCapKRW = booster.poolCapKRW ?? DEFAULT_SETTINGS.poolCapKRW;
   const initialKRW = booster.initialKRW ?? DEFAULT_SETTINGS.initialKRW;
   const lookback = booster.lookback ?? DEFAULT_SETTINGS.lookback;
   const rollMaxArr = boostActive ? getRollMaxArr(lookback, data) : null;
@@ -602,7 +600,6 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   let lastSellIdx = startIdx;
   // 양도세 누적: 당해 실현손익 → 연말에 세액 확정 → 이듬해 5월 납부
   let realizedGain = 0, taxPaid = 0, taxDue = 0, taxDueYear = -1;
-  let capApplied = 0;           // POOL 비중캡이 실제로 발동한 횟수
   const cashflows = [];         // IRR 계산용 (납입 -, 최종평가 +)
   const daily = [], trades = [], boostTrades = [], marketOffTrades = [], antTrades = [];
 
@@ -804,17 +801,6 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
         pool -= boost;
         totalIn += weeklyKRW;
         cashflows.push({ t: (i - startIdx) / 252, amt: -weeklyKRW });
-
-        // Pool cap: total <= poolCapKRW and pool > total*10% → reinvest excess
-        const total = shares * price + pool;
-        if (total <= poolCapKRW && pool > total * 0.10) {
-          const excess = pool - total * 0.10;
-          const extraShares = excess / price;
-          avgCost = (avgCost * shares + excess) / (shares + extraShares);
-          shares += extraShares;
-          pool -= excess;
-          capApplied++;
-        }
       }
     }
 
@@ -848,7 +834,6 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
     finalAfterTax,
     taxPaid: taxPaid + taxDue,
     taxEnabled,
-    capApplied,
     finalStock: last.stockValue,
     finalPool: last.pool,
     totalIn,
