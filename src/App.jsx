@@ -16,6 +16,7 @@ import './App.css'
 // 부스터 세로 음영(#f59e0b, 투명도 0.14)과 구분되도록 더 진한 주황을 쓴다.
 const STOCK_COLOR = '#10b981'
 const HOT_COLOR = '#f97316'
+const PRICE_COLOR = '#38bdf8'
 // 나스닥100이 200일선 아래인 구간(POOL 지출 정지) 음영.
 // 부스터 주황과 반대 의미라 대비되는 청회색을 쓴다.
 const REGIME_COLOR = '#64748b'
@@ -1008,6 +1009,7 @@ function BacktestDetail({ window: win, settings }) {
           <CartesianGrid strokeDasharray="3 3" stroke="#2e303a" />
           <XAxis dataKey="date" minTickGap={80} />
           <YAxis tickFormatter={v => `${(v / 1e8).toFixed(1)}억`} width={55} />
+          <YAxis yAxisId="price" orientation="right" tickFormatter={v => `$${v.toFixed(0)}`} width={45} stroke={PRICE_COLOR} />
           <Tooltip content={<CustomTooltip />} />
           {regimeRanges.map(([s, e]) => (
             <ReferenceArea key={`rg-${s}-${e}`} x1={s} x2={e} fill={REGIME_COLOR} fillOpacity={0.22} strokeOpacity={0} ifOverflow="visible" />
@@ -1030,11 +1032,19 @@ function BacktestDetail({ window: win, settings }) {
             stroke="#9ca3af" strokeDasharray="4 3" strokeWidth={1.5}
             dot={false} isAnimationActive={false}
           />
+          <Line
+            yAxisId="price" type="monotone" dataKey="priceUSD"
+            stroke={PRICE_COLOR} strokeDasharray="5 4" strokeWidth={2}
+            dot={false} isAnimationActive={false}
+          />
           <Scatter dataKey="sell" shape={<SellDot />} isAnimationActive={false} />
         </ComposedChart>
       </ResponsiveContainer>
-      {(hasHot || regimeRanges.length > 0 || (settings.enabled && boostRanges.length > 0)) && (
-        <div style={{ fontSize: 12, color: '#9ca3af', marginTop: -18, marginBottom: 18, display: 'flex', gap: 18, flexWrap: 'wrap' }}>
+      <div style={{ fontSize: 12, color: '#9ca3af', marginTop: -18, marginBottom: 18, display: 'flex', gap: 18, flexWrap: 'wrap' }}>
+          <span>
+            <span style={{ display: 'inline-block', width: 14, borderTop: `2px dashed ${PRICE_COLOR}`, marginRight: 6, verticalAlign: 'middle' }} />
+            파란 점선 = TQQQ 가격 (오른쪽 축, $)
+          </span>
           {settings.enabled && boostRanges.length > 0 && (
             <span>
               <span style={{ display: 'inline-block', width: 10, height: 10, background: '#f59e0b', opacity: 0.4, marginRight: 6, verticalAlign: 'middle' }} />
@@ -1054,7 +1064,6 @@ function BacktestDetail({ window: win, settings }) {
             </span>
           )}
         </div>
-      )}
 
       <table className="sell-table">
         <thead>
