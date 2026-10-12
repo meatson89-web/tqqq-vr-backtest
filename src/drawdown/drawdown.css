@@ -1,0 +1,55 @@
+/* 하락장 기록·모니터 — .monitor(모니터링 화면) 스타일 위에 덧붙인다. .dd 하위로만 적용된다. */
+.dd { text-align: left; }
+.dd-lead { font-size: 13.5px; color: var(--mn-ink); line-height: 1.7; margin: -4px 0 14px; max-width: 72ch; }
+.dd-lead b { color: var(--mn-accent); }
+.dd-h { font-size: 14.5px; font-weight: 700; color: var(--mn-ink); margin: 22px 0 8px; }
+.dd .mn-tw td.neg, .dd .mn-tw td .neg { color: #e66767; font-weight: 600; }
+.dd .mn-tw td.pos { color: #4cc38a; font-weight: 600; }
+.dd .mn-tw td.dim, .dd .dim { color: var(--mn-dim); }
+.dd .mn-tw th.c { text-align: center; }
+.dd-cases { font-size: 11px; color: var(--mn-mute); line-height: 1.5; margin-top: 2px; }
+.dd .mn-tw table.dd-ev tr.grp td { border-bottom: 0; }
+.dd .mn-tw td.dd-name { font-weight: 600; vertical-align: middle; border-bottom: 1px solid var(--mn-grid); }
+.legend-row { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--mn-mute); margin: 4px 0 6px; }
+.legend-row span { display: inline-flex; align-items: center; gap: 6px; }
+.legend-row i { display: inline-block; width: 16px; height: 3px; border-radius: 2px; }
+.legend-row i.box { height: 11px; width: 14px; border: 1px solid var(--mn-border); }
+.dd-list { margin: 10px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 7px; font-size: 12.5px; line-height: 1.65; color: var(--mn-ink); max-width: 80ch; }
+.dd-list b { color: var(--mn-accent); font-weight: 600; }
+
+.dd-form { gap: 8px 14px; }
+.dd-form label { display: inline-flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--mn-mute); }
+.dd-form label b { color: var(--mn-ink); font-weight: 600; }
+.dd-form input[type=date], .dd-form input[type=number], .dd-form select {
+  font: inherit; font-size: 12.5px; font-family: ui-monospace, Menlo, Consolas, monospace;
+  padding: 5px 8px; border-radius: 5px; border: 1px solid var(--mn-border); background: var(--mn-panel); color: var(--mn-ink); width: 130px;
+}
+.dd-form select { width: 220px; }
+.dd-form input[type=range] { width: 170px; accent-color: #c98500; }
+.dd-msg { font-size: 11px; color: var(--mn-mute); flex-basis: 100%; }
+
+.dd-state { margin: 4px 0 6px; padding: 13px 15px; border-radius: 8px; background: var(--mn-panel); border: 1px solid var(--mn-border); border-left-width: 4px; display: flex; flex-direction: column; gap: 8px; }
+.dd-state.A { border-left-color: #4cc38a; } .dd-state.B { border-left-color: #e66767; } .dd-state.C { border-left-color: #e8a33d; }
+.dd-state p { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.55; color: var(--mn-ink); }
+.dd-pill { display: inline-flex; align-items: center; gap: 6px; width: fit-content; font-size: 11.5px; font-weight: 700; padding: 2px 10px; border-radius: 999px; }
+.dd-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.dd-pill.A { color: #4cc38a; background: rgba(76,195,138,.12); }
+.dd-pill.B { color: #e66767; background: rgba(230,103,103,.12); }
+.dd-pill.C { color: #e8a33d; background: rgba(232,163,61,.12); }
+.dd-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.dd-kv div { display: flex; flex-direction: column; gap: 2px; }
+.dd-kv span { font-size: 10.5px; color: var(--mn-mute); }
+.dd-kv b { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 16px; color: var(--mn-ink); font-weight: 600; }
+
+.dd .mn-tw table.dd-ana tr.off td { opacity: .45; }
+.dd .mn-tw table.dd-ana input[type=checkbox] { width: 15px; height: 15px; accent-color: #e8a33d; cursor: pointer; }
+.dd .mn-tw table.dd-ana tfoot td { border-top: 2px solid var(--mn-border); font-weight: 700; color: var(--mn-accent); }
+.dd-sw { display: inline-block; width: 14px; height: 3px; border-radius: 2px; margin-right: 7px; vertical-align: middle; }
+.dd .mn-tw td { white-space: nowrap; }
+.dd .mn-tw table.dd-ana th:nth-child(2), .dd .mn-tw table.dd-ana td:nth-child(2),
+.dd .mn-tw table.dd-ana th:nth-child(3), .dd .mn-tw table.dd-ana td:nth-child(3) { text-align: left; }
+.dd .mn-tw td.dd-wrap { white-space: normal; min-width: 200px; }
+/* 표가 화면보다 넓어도 페이지가 아니라 표 상자 안에서 가로 스크롤되게 한다
+   (너비 0 + 최소 100%: 부모 폭 계산에 표 너비가 끼어들지 않는다) */
+.dd .mn-tw { width: 0; min-width: 100%; }
+.dd .dd-form { min-width: 0; }

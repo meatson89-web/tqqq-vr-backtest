@@ -10,6 +10,8 @@ import {
   throttlePctForRsi, throttleFirstTier,
 } from './lib/backtest'
 import Monitor from './monitor/Monitor.jsx'
+import DrawdownRecord from './drawdown/DrawdownRecord.jsx'
+import DrawdownMonitor from './drawdown/DrawdownMonitor.jsx'
 import './App.css'
 
 // 주식 영역 색. 과열 스로틀 구간만 주황으로 갈아끼운다.
@@ -496,6 +498,8 @@ function Sidebar({ view, onSelect, collapsed, onToggle }) {
     { id: 'boosterStatus', label: '부스터 상황판' },
     { id: 'sellStatus', label: '매도조건 상황판' },
     { id: 'monitor', label: 'TQQQ 모니터링' },
+    { id: 'ddRecord', label: '하락장 기록' },
+    { id: 'ddMonitor', label: '하락장 모니터' },
     { id: 'info', label: '전략 설명 보기' },
   ]
   const cur = items.find(it => it.id === view)
@@ -1175,6 +1179,8 @@ function App() {
           {view === 'boosterStatus' && <BoosterStatusPanel settings={settings} />}
           {view === 'sellStatus' && <SellStatusPanel settings={settings} />}
           {view === 'monitor' && <Monitor />}
+          {view === 'ddRecord' && <DrawdownRecord />}
+          {view === 'ddMonitor' && <DrawdownMonitor />}
 
           {view === 'custom' && (
             <>
