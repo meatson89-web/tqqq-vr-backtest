@@ -64,3 +64,4 @@
 .dd-scroll:disabled { opacity: .35; }
 .dd-scroll::-webkit-slider-thumb { -webkit-appearance: none; height: 14px; width: max(24px, var(--thumb)); border-radius: 7px; background: #5d7470; cursor: ew-resize; }
 .dd-scroll::-moz-range-thumb { height: 14px; width: max(24px, var(--thumb)); border: 0; border-radius: 7px; background: #5d7470; cursor: ew-resize; }
+.dd .mn-tw table.dd-ana tfoot tr.all td { border-top: 1px solid var(--mn-grid); font-weight: 600; color: var(--mn-mute); }

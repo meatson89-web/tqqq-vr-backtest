@@ -66,17 +66,18 @@ export default function DrawdownMonitor() {
       const st = DD.currentState(s.D, s.Q, s.T, E)
       const excl = st.last ? baseE.find(e => e.pk === st.last.pk) : null
       const M = st.phase === 'A' ? [] : DD.matchAnalogs(base.D, base.Q, base.T, baseE, st.phase, st.f, excl)
+      const all = st.phase === 'A' ? [] : DD.matchAnalogs(base.D, base.Q, base.T, baseE, st.phase, st.f, excl, Infinity)
       let cur = null
       if (st.phase !== 'A') {
         const e = st.last; cur = []
         for (let k = Math.max(e.tp, st.n + XA); k <= st.n; k++) cur.push([k - st.n, (s.T[k] / s.T[e.tp] - 1) * 100])
       }
-      return { st, M, cur, s, what: false }
+      return { st, M, all, cur, s, what: false }
     }
     const f = w.phase === 'B'
       ? { qdd: w.qdd / 100, qmin: Math.min(w.qmin, w.qdd) / 100, days: w.days }
       : { tdd: w.tdd / 100, depth: w.depth / 100, since: w.since }
-    return { st: { phase: w.phase, f }, M: DD.matchAnalogs(base.D, base.Q, base.T, baseE, w.phase, f, null), cur: null, what: true }
+    return { st: { phase: w.phase, f }, M: DD.matchAnalogs(base.D, base.Q, base.T, baseE, w.phase, f, null), all: DD.matchAnalogs(base.D, base.Q, base.T, baseE, w.phase, f, null, Infinity), cur: null, what: true }
   }, [mode, extra, w, base, baseE])
 
   // 체크박스: 결과가 바뀌면 상위 5개를 다시 켠다
@@ -174,6 +175,8 @@ export default function DrawdownMonitor() {
     qRec: mean(sel.map(m => m.o.qRec)),
     r3: mean(sel.map(m => m.o.r3)), r6: mean(sel.map(m => m.o.r6)), r12: mean(sel.map(m => m.o.r12)),
   }
+  // 비교용: 과거 사례 전체(사건마다 가장 닮은 날)의 단순 평균. 검증해 보니 6개월·1년 수익은 닮은 몇 곳보다 이쪽이 더 잘 맞았다.
+  const allAvg = { n: res.all.length, r6: mean(res.all.map(m => m.o.r6)), r12: mean(res.all.map(m => m.o.r12)) }
   const cls = v => v == null ? '' : v >= 0 ? 'pos' : 'neg'
 
   return (
@@ -251,7 +254,8 @@ export default function DrawdownMonitor() {
           <div className="mn-tile"><div className="k">그 뒤 TQQQ 추가 하락 (평균)</div><div className="v">{pct(avg.tFurther)}</div>
             <div className="n">가장 깊었던 곳 {sel.length ? pct(Math.min(...sel.map(m => m.o.tFurther))) : '—'}</div></div>
           <div className="mn-tile"><div className="k">TQQQ 6개월 뒤 (평균)</div><div className="v">{pct(avg.r6)}</div>
-            <div className="n">1년 뒤 평균 {pct(avg.r12)}</div></div>
+            <div className="n">1년 뒤 평균 {pct(avg.r12)}</div>
+            <div className="n">전체 {allAvg.n}건 평균: 6개월 {pct(allAvg.r6)} · 1년 {pct(allAvg.r12)}</div></div>
         </div>
 
         <div className="legend-row">
@@ -313,10 +317,16 @@ export default function DrawdownMonitor() {
                 <td>{ph === 'B' ? span(avg.qRec) : '—'}</td>
                 <td className={cls(avg.r3)}>{pct(avg.r3)}</td><td className={cls(avg.r6)}>{pct(avg.r6)}</td><td className={cls(avg.r12)}>{pct(avg.r12)}</td>
               </tr>
+              <tr className="all">
+                <td />
+                <td colSpan={7}>비교: 과거 사례 전체 {allAvg.n}건 평균 (체크와 무관)</td>
+                <td className={cls(allAvg.r6)}>{pct(allAvg.r6)}</td><td className={cls(allAvg.r12)}>{pct(allAvg.r12)}</td>
+              </tr>
             </tfoot>
           </table>
         </div>
-        <p className="mn-note">"그날 TQQQ" = 그 사례의 하락 직전 TQQQ 고점 대비 위치. 기간은 닮은 날부터 셉니다. 3개월·6개월·1년 = 63·126·252거래일 뒤. 평균은 체크한 사례의 단순 평균이고, 아직 값이 없는 칸은 빼고 계산합니다.</p>
+        <p className="mn-note">"그날 TQQQ" = 그 사례의 하락 직전 TQQQ 고점 대비 위치. 기간은 닮은 날부터 셉니다. 3개월·6개월·1년 = 63·126·252거래일 뒤. 평균은 체크한 사례의 단순 평균이고, 아직 값이 없는 칸은 빼고 계산합니다.
+          맨 아래 "과거 사례 전체 평균"은 비교 대상 전부에서 지금과 가장 닮은 날을 하나씩 골라 낸 평균입니다. 과거 기록으로 검증해 보니 6개월·1년 뒤 수익률은 닮은 몇 곳의 평균보다 전체 평균이 실제와 더 가까웠습니다.</p>
       </>}
 
       <div className="mn-warn">
