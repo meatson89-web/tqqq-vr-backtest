@@ -53,3 +53,14 @@
    (너비 0 + 최소 100%: 부모 폭 계산에 표 너비가 끼어들지 않는다) */
 .dd .mn-tw { width: 0; min-width: 100%; }
 .dd .dd-form { min-width: 0; }
+
+/* 모니터 차트 확대·이동 */
+.dd-zoom { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin: 2px 0 4px; }
+.dd-zoom span { font-size: 11px; color: var(--mn-mute); margin-right: auto; }
+.dd-zoom .mn-tab { padding: 3px 10px; min-width: 32px; }
+.dd-zoom .mn-tab:disabled { opacity: .4; cursor: default; }
+.dd-chartbox { cursor: grab; user-select: none; touch-action: pan-y; }
+.dd-scroll { display: block; width: calc(100% - 64px); margin: 2px 16px 0 48px; height: 14px; appearance: none; -webkit-appearance: none; background: var(--mn-grid); border-radius: 7px; }
+.dd-scroll:disabled { opacity: .35; }
+.dd-scroll::-webkit-slider-thumb { -webkit-appearance: none; height: 14px; width: max(24px, var(--thumb)); border-radius: 7px; background: #5d7470; cursor: ew-resize; }
+.dd-scroll::-moz-range-thumb { height: 14px; width: max(24px, var(--thumb)); border: 0; border-radius: 7px; background: #5d7470; cursor: ew-resize; }

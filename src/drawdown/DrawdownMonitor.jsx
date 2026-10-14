@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts'
@@ -13,6 +13,18 @@ const COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300'
 const NOW = '#dfe8e6', GRID = '#1c2528', MUTE = '#7c9490'
 const DEFAULT_ON = 5
 const XA = -260, XB = 252
+const MIN_SPAN = 20
+// 차트 그림 영역 = 왼쪽 세로축 폭(48) ~ 오른쪽 여백(16)
+const PLOT_L = 48, PLOT_R = 16
+
+// 보이는 구간 길이에 맞춰 가로축 눈금 간격(거래일)을 고른다
+function xTicks(a, b) {
+  const step = [5, 10, 21, 42, 63, 126].find(s => (b - a) / s <= 7) ?? 126
+  const t = []
+  for (let v = Math.ceil(a / step) * step; v <= b; v += step) t.push(v)
+  return t
+}
+const xLabel = v => v === 0 ? '지금' : v % 21 === 0 ? `${v > 0 ? '+' : '−'}${Math.abs(v / 21)}개월` : `${v > 0 ? '+' : '−'}${Math.abs(v)}일`
 
 const pct = (x, d = 0) => {
   if (x == null || isNaN(x)) return '—'
@@ -75,6 +87,53 @@ export default function DrawdownMonitor() {
   const toggle = k => setChk(c => ({ ...c, on: c.on.map((v, j) => j === k ? !v : v) }))
   const sel = res.M.filter((_, k) => on[k])
 
+  // 가로 확대·이동: 보이는 구간 [a, b] (거래일, 지금 = 0)
+  const [view, setView] = useState([XA, XB])
+  const clampView = (a, b) => {
+    const len = Math.round(Math.min(XB - XA, Math.max(MIN_SPAN, b - a)))
+    a = Math.round(Math.max(XA, Math.min(XB - len, a)))
+    return [a, a + len]
+  }
+  // 중심 c(거래일)를 고정하고 f배로 넓히거나 좁힌다
+  const zoom = (f, c) => setView(([a, b]) => { c ??= (a + b) / 2; return clampView(c - (c - a) * f, c + (b - c) * f) })
+  const pan = d => setView(([a, b]) => clampView(a + d, b + d))
+  const boxRef = useRef(null)
+  const viewRef = useRef(view); viewRef.current = view
+  const hasChart = res.M.length > 0
+  useEffect(() => {
+    const el = boxRef.current
+    if (!el) return
+    const plotW = () => el.getBoundingClientRect().width - PLOT_L - PLOT_R
+    // 휠: 위아래 = 커서 위치를 중심으로 확대·축소, 좌우(트랙패드 또는 Shift+휠) = 이동
+    const onWheel = ev => {
+      ev.preventDefault()
+      const [a, b] = viewRef.current
+      const dx = ev.shiftKey ? ev.deltaY : ev.deltaX, dy = ev.shiftKey ? 0 : ev.deltaY
+      if (Math.abs(dx) > Math.abs(dy)) { pan(dx / plotW() * (b - a)); return }
+      const fx = Math.min(1, Math.max(0, (ev.clientX - el.getBoundingClientRect().left - PLOT_L) / plotW()))
+      zoom(Math.exp(dy * 0.0015), a + fx * (b - a))
+    }
+    // 마우스로 끌어서 좌우 이동
+    let drag = null
+    const down = ev => { if (ev.pointerType === 'mouse' && ev.button === 0) { drag = { x: ev.clientX, v: viewRef.current }; el.style.cursor = 'grabbing' } }
+    const move = ev => {
+      if (!drag) return
+      const [a, b] = drag.v, d = (ev.clientX - drag.x) / plotW() * (b - a)
+      setView(clampView(a - d, b - d))
+    }
+    const up = () => { drag = null; el.style.cursor = '' }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    el.addEventListener('pointerdown', down)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('pointerdown', down)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+  }, [hasChart])
+
   const chart = useMemo(() => {
     const rows = []
     for (let x = XA; x <= XB; x++) rows.push({ x })
@@ -85,17 +144,18 @@ export default function DrawdownMonitor() {
     if (res.cur) for (const [x, v] of res.cur) rows[x - XA].now = v
     return rows
   }, [res, base])
-  // 켜진 선만으로 세로축 범위를 잡는다 (20%p 또는 40%p 눈금)
+  const shown = useMemo(() => chart.slice(view[0] - XA, view[1] - XA + 1), [chart, view])
+  // 보이는 구간의 켜진 선만으로 세로축 범위를 잡는다 (20%p 또는 40%p 눈금)
   const yAxis = useMemo(() => {
     const keys = res.M.map((_, k) => 'c' + k).filter((_, k) => on[k]).concat(res.cur ? ['now'] : [])
     let lo = 0, hi = 0
-    for (const r of chart) for (const k of keys) if (r[k] != null) { lo = Math.min(lo, r[k]); hi = Math.max(hi, r[k]) }
-    const step = hi - lo > 160 ? 40 : 20
+    for (const r of shown) for (const k of keys) if (r[k] != null) { lo = Math.min(lo, r[k]); hi = Math.max(hi, r[k]) }
+    const step = hi - lo > 160 ? 40 : hi - lo > 50 ? 20 : 10
     lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step
     const ticks = []
     for (let v = lo; v <= hi; v += step) ticks.push(v)
     return { domain: [lo, hi], ticks }
-  }, [chart, on, res])
+  }, [shown, on, res])
 
   const submit = () => {
     const v = { date: form.date, q: +form.q, t: +form.t }
@@ -198,11 +258,18 @@ export default function DrawdownMonitor() {
           {res.cur && <span><i style={{ background: NOW, height: 4 }} />지금 (TQQQ)</span>}
           {M.map((m, k) => on[k] && <span key={k}><i style={{ background: COLORS[k] }} />{m.e.name}</span>)}
         </div>
+        <div className="dd-zoom">
+          <span>휠 = 확대·축소 · 끌기 또는 아래 막대 = 좌우 이동</span>
+          <button className="mn-tab" onClick={() => zoom(0.6)} aria-label="확대">＋</button>
+          <button className="mn-tab" onClick={() => zoom(1 / 0.6)} aria-label="축소">−</button>
+          <button className="mn-tab" onClick={() => setView([XA, XB])} disabled={view[0] === XA && view[1] === XB}>전체 보기</button>
+        </div>
+        <div ref={boxRef} className="dd-chartbox">
         <ResponsiveContainer width="100%" height={300}>
-          <ComposedChart data={chart} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+          <ComposedChart data={shown} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
             <CartesianGrid stroke={GRID} vertical={false} />
-            <XAxis dataKey="x" type="number" domain={[XA, XB]} ticks={[-252, -126, 0, 126, 252]}
-              tickFormatter={v => v === 0 ? '지금' : `${v > 0 ? '+' : '−'}${Math.abs(v / 21).toFixed(0)}개월`} tick={{ fill: MUTE, fontSize: 11 }} />
+            <XAxis dataKey="x" type="number" domain={view} allowDataOverflow ticks={xTicks(...view)}
+              tickFormatter={xLabel} tick={{ fill: MUTE, fontSize: 11 }} />
             <YAxis domain={yAxis.domain} ticks={yAxis.ticks} tick={{ fill: MUTE, fontSize: 11 }} tickFormatter={v => v + '%'} width={48} />
             <ReferenceLine y={0} stroke={MUTE} strokeDasharray="4 3" label={{ value: '하락 직전 TQQQ 고점', position: 'insideTopLeft', fill: MUTE, fontSize: 11 }} />
             <ReferenceLine x={0} stroke={NOW} />
@@ -211,6 +278,11 @@ export default function DrawdownMonitor() {
             {res.cur && <Line dataKey="now" name="지금" stroke={NOW} strokeWidth={2.6} dot={false} isAnimationActive={false} />}
           </ComposedChart>
         </ResponsiveContainer>
+        </div>
+        <input type="range" className="dd-scroll" min={XA} max={XB - (view[1] - view[0])} value={view[0]}
+          disabled={view[1] - view[0] >= XB - XA} aria-label="차트 좌우 이동"
+          style={{ '--thumb': `${(view[1] - view[0]) / (XB - XA) * 100}%` }}
+          onChange={e => { const a = +e.target.value; setView(([x, y]) => clampView(a, a + y - x)) }} />
         <p className="mn-note">세로선 = 지금(과거 사례는 지금과 닮았던 날). 오른쪽은 그 사례에서 이후 252거래일 동안 TQQQ가 실제로 간 길입니다.</p>
 
         <div className="mn-tw">
