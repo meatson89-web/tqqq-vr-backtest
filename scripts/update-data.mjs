@@ -32,6 +32,17 @@ async function fetchSeries(symbol, fromISO, minRows) {
       Math.round(price * 10000) / 10000,
     ]);
   }
+  // 장 마감 후 몇 시간 동안은 마지막 거래일 일봉이 빠지거나 adjclose가 null로 와서
+  // 하루씩 밀린다 → 정규장 마감(뉴욕 16시) 이후 확정된 meta 종가로 보충.
+  // 다음 실행에서 전체를 다시 받으므로 Yahoo 일봉이 생기면 그 값으로 덮어써진다.
+  const meta = result.meta;
+  const ny = new Date((meta.regularMarketTime + meta.gmtoffset) * 1000);
+  const nyDate = ny.toISOString().slice(0, 10);
+  if (ny.getUTCHours() >= 16 && meta.regularMarketPrice != null
+      && rows.length && rows[rows.length - 1][0] < nyDate) {
+    rows.push([nyDate, Math.round(meta.regularMarketPrice * 10000) / 10000]);
+    console.log(`${symbol}: ${nyDate} 일봉 미반영 → meta 종가 ${meta.regularMarketPrice}로 보충`);
+  }
   // 방어: 응답이 깨졌을 때 멀쩡한 파일을 덮어쓰지 않는다
   if (rows.length < minRows) {
     throw new Error(`${symbol} 행 수 비정상 (${rows.length} < ${minRows}) — 갱신 중단`);
