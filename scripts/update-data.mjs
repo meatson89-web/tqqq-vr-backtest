@@ -26,13 +26,30 @@ async function fetchSeries(symbol, fromISO, minRows) {
   const timestamps = result.timestamp;
   const adjclose = result.indicators.adjclose[0].adjclose;
   const rows = [];
+  const holes = [];
   for (let i = 0; i < timestamps.length; i++) {
     const price = adjclose[i];
-    if (price == null) continue;
+    if (price == null) { holes.push(i); continue; }
     rows.push([
       new Date(timestamps[i] * 1000).toISOString().slice(0, 10),
       Math.round(price * 10000) / 10000,
     ]);
+  }
+  // 중간 거래일 일봉이 null로 오는 경우가 있다 (예: ^SOX 2026-10-21).
+  // 같은 날 1시간봉 마지막 종가로 채운다 — 최근 3개월 비교에서 일봉 종가와 0.2~0.35% 이내.
+  // 다음 실행에서 전체를 다시 받으므로 Yahoo 일봉이 생기면 그 값으로 덮어써진다.
+  const lastIdx = timestamps.length - 1;
+  const mid = holes.filter(i => i < lastIdx);
+  if (mid.length) {
+    const intraday = await lastHourlyClose(symbol);
+    for (const i of mid) {
+      const d = new Date((timestamps[i] + result.meta.gmtoffset) * 1000).toISOString().slice(0, 10);
+      const v = intraday.get(d);
+      if (v == null) { console.warn(`${symbol}: ${d} 일봉 null, 1시간봉도 없어 빠짐`); continue; }
+      rows.push([d, Math.round(v * 10000) / 10000]);
+      console.log(`${symbol}: ${d} 일봉 null → 1시간봉 마지막 종가 ${v}로 보충`);
+    }
+    rows.sort((a, b) => a[0] < b[0] ? -1 : 1);
   }
   // 장 마감 후 몇 시간 동안은 마지막 거래일 일봉이 빠지거나 adjclose가 null로 와서
   // 하루씩 밀린다 → 정규장 마감(뉴욕 16시) 이후 확정된 meta 종가로 보충.
@@ -50,6 +67,25 @@ async function fetchSeries(symbol, fromISO, minRows) {
     throw new Error(`${symbol} 행 수 비정상 (${rows.length} < ${minRows}) — 갱신 중단`);
   }
   return rows;
+}
+
+// 날짜(뉴욕) → 그날 정규장 마지막 1시간봉 종가. 6봉 미만인 날(반쪽 데이터)은 쓰지 않는다.
+async function lastHourlyClose(symbol) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=730d&interval=60m`;
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  const out = new Map(), cnt = new Map();
+  if (!res.ok) return out;
+  const r = (await res.json())?.chart?.result?.[0];
+  if (!r?.timestamp) return out;
+  r.timestamp.forEach((ts, i) => {
+    const c = r.indicators.quote[0].close[i];
+    const ny = new Date((ts + r.meta.gmtoffset) * 1000);
+    if (c == null || ny.getUTCHours() >= 16) return;
+    const d = ny.toISOString().slice(0, 10);
+    out.set(d, c); cnt.set(d, (cnt.get(d) ?? 0) + 1);
+  });
+  for (const [d, n] of cnt) if (n < 6) out.delete(d);
+  return out;
 }
 
 function writeIfChanged(name, rows) {
@@ -99,6 +135,15 @@ if (lastT !== lastQ) console.warn(`주의: 최신일 불일치 TQQQ ${lastT} / Q
 
 const a = writeIfChanged('tqqq.json', tqqq);
 const b = writeIfChanged('qqq.json', qqq);
+const sox = await fetchSeries('%5ESOX', '2009-01-01', 3000);
+{
+  const qd = new Set(qqq.map(r => r[0]));
+  for (const [name, rows] of [['TQQQ', tqqq], ['SOX', sox]]) {
+    const have = new Set(rows.map(r => r[0]));
+    const miss = [...qd].filter(d => d >= rows[0][0] && !have.has(d));
+    if (miss.length) console.warn(`주의: ${name}에 QQQ 거래일 ${miss.length}일 빠짐 (${miss.slice(-5).join(', ')})`);
+  }
+}
 const c = writeIfChanged('soxl_1h.json', await fetchHourly('SOXL', 'soxl_1h.json'));
-const d = writeIfChanged('sox.json', await fetchSeries('%5ESOX', '2009-01-01', 3000));
+const d = writeIfChanged('sox.json', sox);
 if (!a && !b && !c && !d) console.log('전체 변경 없음.');
