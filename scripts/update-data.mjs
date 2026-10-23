@@ -2,6 +2,8 @@
 // GitHub Actions 스케줄러(.github/workflows/update-data.yml)에서 실행됨
 //   - tqqq.json : 백테스트 대시보드용 (2010~)
 //   - qqq.json  : TQQQ 모니터링용 이격도·3배 시뮬 기준 (1999~)
+//   - soxl_1h.json : SOXL 현황판용 정규장 1시간봉 종가 (야후는 최근 730일만 주므로 기존 파일에 이어 붙인다)
+//   - sox.json  : SOXL 현황판 추세 필터용 ^SOX 일봉 (2009~)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,6 +65,30 @@ function writeIfChanged(name, rows) {
   return true;
 }
 
+// 정규장 1시간봉 (뉴욕 09:30 앵커). 16:00에 붙는 장 마감 시점 값은 봉이 아니라 빼고, 기존 파일과 시각 기준으로 합친다.
+async function fetchHourly(symbol, name) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=730d&interval=60m`
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+  if (!res.ok) throw new Error(`${symbol} 1시간봉 요청 실패: ${res.status}`);
+  const result = (await res.json())?.chart?.result?.[0];
+  if (!result?.timestamp) throw new Error(`${symbol} 1시간봉 응답에 데이터 없음`);
+  const off = result.meta.gmtoffset;
+  const close = result.indicators.quote[0].close;
+  const merged = new Map();
+  const out = path.join(DATA_DIR, name);
+  if (fs.existsSync(out)) for (const [t, c] of JSON.parse(fs.readFileSync(out, 'utf-8'))) merged.set(t, c);
+  let n = 0;
+  result.timestamp.forEach((ts, i) => {
+    if (close[i] == null) return;
+    const ny = new Date((ts + off) * 1000);
+    if (ny.getUTCHours() >= 16) return;
+    merged.set(new Date(ts * 1000).toISOString().slice(0, 16) + 'Z', Math.round(close[i] * 10000) / 10000);
+    n++;
+  });
+  if (n < 1000) throw new Error(`${symbol} 1시간봉 행 수 비정상 (${n}) — 갱신 중단`);
+  return [...merged].sort((a, b) => a[0] < b[0] ? -1 : 1);
+}
+
 const tqqq = await fetchSeries('TQQQ', '2010-01-01', 3000);
 const qqq = await fetchSeries('QQQ', '1999-03-01', 6000);
 
@@ -73,4 +99,6 @@ if (lastT !== lastQ) console.warn(`주의: 최신일 불일치 TQQQ ${lastT} / Q
 
 const a = writeIfChanged('tqqq.json', tqqq);
 const b = writeIfChanged('qqq.json', qqq);
-if (!a && !b) console.log('전체 변경 없음.');
+const c = writeIfChanged('soxl_1h.json', await fetchHourly('SOXL', 'soxl_1h.json'));
+const d = writeIfChanged('sox.json', await fetchSeries('%5ESOX', '2009-01-01', 3000));
+if (!a && !b && !c && !d) console.log('전체 변경 없음.');

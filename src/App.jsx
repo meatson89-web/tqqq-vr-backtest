@@ -12,6 +12,8 @@ import {
 import Monitor from './monitor/Monitor.jsx'
 import DrawdownRecord from './drawdown/DrawdownRecord.jsx'
 import DrawdownMonitor from './drawdown/DrawdownMonitor.jsx'
+import SoxlSummary from './soxl/SoxlSummary.jsx'
+import SoxlBoard from './soxl/SoxlBoard.jsx'
 import './App.css'
 
 // 주식 영역 색. 과열 스로틀 구간만 주황으로 갈아끼운다.
@@ -500,6 +502,8 @@ function Sidebar({ view, onSelect, collapsed, onToggle }) {
     { id: 'monitor', label: 'TQQQ 모니터링' },
     { id: 'ddRecord', label: '하락장 기록' },
     { id: 'ddMonitor', label: '하락장 모니터' },
+    { id: 'soxlShort', label: 'SOXL 단기' },
+    { id: 'soxlBoard', label: 'SOXL 투자 현황판' },
     { id: 'info', label: '전략 설명 보기' },
   ]
   const cur = items.find(it => it.id === view)
@@ -1181,6 +1185,8 @@ function App() {
           {view === 'monitor' && <Monitor />}
           {view === 'ddRecord' && <DrawdownRecord />}
           {view === 'ddMonitor' && <DrawdownMonitor />}
+          {view === 'soxlShort' && <SoxlSummary />}
+          {view === 'soxlBoard' && <SoxlBoard />}
 
           {view === 'custom' && (
             <>

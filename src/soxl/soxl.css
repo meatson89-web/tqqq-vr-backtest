@@ -1,0 +1,15 @@
+/* SOXL 단기 요약·현황판 — .monitor.dd 스타일 위에 덧붙인다. .sx 하위로만 적용된다. */
+.sx .pos { color: #4cc38a; } .sx .neg { color: #e66767; }
+.sx-rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.sx-rules div { background: var(--mn-panel); border: 1px solid var(--mn-border); border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 3px; }
+.sx-rules span { font-size: 10.5px; color: var(--mn-mute); }
+.sx-rules b { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 17px; color: var(--mn-accent); }
+.sx-rules em { font-style: normal; font-size: 11.5px; color: var(--mn-ink); line-height: 1.45; }
+.sx .mn-tw td.c, .sx .mn-tw th.c { text-align: center; }
+.sx .mn-tw table.sx-grid { min-width: 420px; }
+.sx .mn-tw table.sx-grid td.pick { outline: 2px solid var(--mn-accent); outline-offset: -2px; color: var(--mn-accent); font-weight: 700; }
+.sx .mn-tw tr.sx-lose td { background: rgba(230,103,103,.07); }
+.sx-chip { display: inline-block; font-size: 10.5px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--mn-border); color: var(--mn-mute); }
+.sx-chip.keep { color: #4cc38a; border-color: rgba(76,195,138,.5); background: rgba(76,195,138,.1); }
+.sx-chip.opt { color: #e8a33d; border-color: rgba(232,163,61,.5); background: rgba(232,163,61,.1); }
+.sx .dd-kv b.pos { color: #4cc38a; } .sx .dd-kv b.neg { color: #e66767; }
