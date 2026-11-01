@@ -793,7 +793,7 @@ function CustomTooltip({ active, payload, label }) {
       <p style={{ color: '#f3f4f6', margin: '2px 0' }}>RSI(14): {d.rsi != null && !isNaN(d.rsi) ? d.rsi.toFixed(1) : '-'}</p>
       <p style={{ color: '#f3f4f6', margin: '2px 0' }}>180일 이격도: {d.disp != null && !isNaN(d.disp) ? `${d.disp.toFixed(1)}%` : '-'}</p>
       {d.hot && <p style={{ color: HOT_COLOR, margin: '2px 0' }}>과열 스로틀 발동 — POOL 재투자 중단</p>}
-      <p style={{ color: '#e2e8f0', margin: '6px 0 2px' }}>총자산: {(total / 1e8).toFixed(2)}억</p>
+      <p style={{ color: '#e2e8f0', margin: '6px 0 2px' }}>총자산(세전): {(total / 1e8).toFixed(2)}억</p>
       <p style={{ color: d.hot ? HOT_COLOR : STOCK_COLOR, margin: '2px 0' }}>주식: {((d.stock || 0) / 1e8).toFixed(2)}억</p>
       <p style={{ color: '#3b82f6', margin: '2px 0' }}>POOL: {((d.pool || 0) / 1e8).toFixed(2)}억</p>
       <p style={{ color: '#9ca3af', margin: '2px 0' }}>투입: {((d.totalIn || 0) / 1e8).toFixed(2)}억</p>
@@ -865,7 +865,8 @@ function BacktestDetail({ window: win, settings }) {
 
   const chartData = useMemo(() => {
     return daily
-      .filter((d, i) => i % 5 === 0 || sellDates.has(d.date) || boostBoundaryDates.has(d.date) || hotBoundaryDates.has(d.date) || regimeBoundaryDates.has(d.date))
+      // 마지막 날은 항상 포함 — 빠지면 차트 끝값이 요약(종료일 기준)과 어긋난다
+      .filter((d, i) => i % 5 === 0 || i === daily.length - 1 || sellDates.has(d.date) || boostBoundaryDates.has(d.date) || hotBoundaryDates.has(d.date) || regimeBoundaryDates.has(d.date))
       .map(d => ({
         date: d.date,
         pool: d.pool,
