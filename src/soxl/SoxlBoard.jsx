@@ -76,7 +76,8 @@ export default function SoxlBoard() {
   const stop = armed ? peak * (1 - p.trail / 100) : avg * (1 - p.hard / 100)
   const ret = has ? px / avg - 1 : null
   const hit = has && px <= stop
-  const hold = hit && !armed && !nextBull // 진입 차단 중 하드스탑 → 해제까지 매도 보류
+  // 이 봉이 차단 상태일 때만 보류한다. 오늘 열려 있으면 내일 닫혀도 규칙상 지금 매도다.
+  const hold = hit && !armed && !sim.bull[n]
   const exit = hit && !hold
 
   // 차트
@@ -147,7 +148,9 @@ export default function SoxlBoard() {
         <div className={`dd-state ${exit || hold ? 'B' : armed ? 'A' : 'C'}`}>
           <span className={`dd-pill ${exit || hold ? 'B' : armed ? 'A' : 'C'}`}>{hold ? '손절 보류' : exit ? '청산 신호' : armed ? '보유 · 트레일링 작동' : '보유 · 발동 전'}</span>
           <p>{hold
-            ? `현재가 ${usd(px)}가 하드스탑 ${usd(stop)} 이하지만 진입 차단 중이라 매도를 보류합니다. SOX 종가가 200일선(${soxReg.sma.toFixed(0)}) 위로 올라서면 다음 거래일 첫 1시간봉 종가에 전량 매도합니다.`
+            ? (nextBull
+              ? `진입 차단이 풀렸습니다. 다음 거래일 첫 1시간봉 종가에 전량 매도합니다. 현재가 ${usd(px)}, 하드스탑 ${usd(stop)}.`
+              : `현재가 ${usd(px)}가 하드스탑 ${usd(stop)} 이하지만 진입 차단 중이라 매도를 보류합니다. SOX 종가가 200일선(${soxReg.sma.toFixed(0)}) 위로 올라서면 다음 거래일 첫 1시간봉 종가에 전량 매도합니다.`)
             : exit
             ? `현재가 ${usd(px)}가 ${armed ? '트레일 스탑' : '하드스탑'} ${usd(stop)} 이하입니다. 1시간봉 종가 기준이면 규칙상 전량 청산입니다.`
             : armed

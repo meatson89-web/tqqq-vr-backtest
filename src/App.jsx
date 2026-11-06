@@ -547,8 +547,13 @@ function StatusItem({ label, value, tone }) {
 }
 
 // 이번 주 수요일에 실제로 적용될 POOL 재투자 비율을 한 줄로 알려주는 배지.
-// 우선순위는 백테스트 로직과 같다: 부스터 > 과열 스로틀 > 기본 5%.
+// 우선순위는 백테스트 로직과 같다: 추세국면 잠금 > 부스터 > 과열 스로틀 > 기본 5%.
 function PoolRatioBadge({ s }) {
+  if (s.regimeLocked && s.effectivePoolPct < s.basePoolPct) {
+    return <span className="status-badge on" style={{ background: '#1e293b', borderColor: '#64748b', color: '#cbd5e1' }}>
+      🔒 추세국면 잠금 (POOL 주간 재투자 {s.basePoolPct}% → {s.effectivePoolPct}%, 정액 적립금은 유지)
+    </span>
+  }
   if (s.boosterOn) {
     return <span className="status-badge on">🟠 부스터 ON (POOL 주간 재투자 {s.basePoolPct}% → {s.ratioPct}%)</span>
   }
@@ -602,26 +607,30 @@ function BoosterStatusPanel({ settings }) {
         {rg.enabled && (
           <StatusItem
             label={`추세국면 (나스닥100 ${rg.dwellDays === 1 ? '' : `${rg.dwellDays}일 `}${settings.regimeMaLen}일선)`}
-            value={rg.locked
-              ? (rg.dwell > 0
-                ? `이탈 ${rg.dwell}일째 · POOL 지출 정지`
-                : `해제 대기 ${rg.aboveRun}/${rg.exitDays}일 · 아직 정지`)
-              : rg.above
-                ? `선 위 +${rg.gapPct.toFixed(1)}% · 정상`
-                : `선 아래 ${rg.gapPct.toFixed(1)}% · 다음 거래일부터 POOL 지출 정지`}
-            tone={rg.locked || !rg.above ? 'warn' : undefined}
+            value={!rg.lockedNext
+              ? (rg.locked
+                ? `선 위 +${rg.gapPct.toFixed(1)}% · 다음 거래일 해제`
+                : `선 위 +${rg.gapPct.toFixed(1)}% · 정상`)
+              : !rg.locked
+                ? `선 아래 ${rg.gapPct.toFixed(1)}% · 다음 거래일부터 POOL 지출 정지`
+                : rg.above
+                  ? `해제 대기 ${rg.nextAboveRun}/${rg.exitDays}일 · 아직 정지`
+                  : `이탈 ${rg.nextDwell}일째 · POOL 지출 정지`}
+            tone={rg.locked || rg.lockedNext ? 'warn' : undefined}
           />
         )}
       </div>
       {rg.enabled && (
         <p style={{ color: '#9ca3af', fontSize: 12, textAlign: 'left', marginTop: 10 }}>
-          {rg.locked
-            ? (rg.dwell > 0
-              ? `나스닥100(QQQ) 전일 종가 ${rg.close.toFixed(2)}가 ${settings.regimeMaLen}일선 ${rg.ma.toFixed(2)} 아래라 부스터와 POOL 재투자가 모두 정지된 상태입니다. 주간 정액 적립금은 그대로 들어갑니다. 선 위로 올라온 뒤 ${rg.exitDays}거래일 연속 유지돼야 해제되며, 복귀 후 가속 매수는 하지 않습니다.`
-              : `선 위로 올라왔지만 아직 ${rg.aboveRun}/${rg.exitDays}거래일이라 잠금이 유지됩니다. ${rg.exitDays - rg.aboveRun}거래일 더 선 위에 있으면 해제됩니다. 하락 도중의 짧은 반등에 잠금이 풀려 부스터가 살아나는 것을 막기 위한 장치입니다.`)
+          {rg.locked && rg.lockedNext
+            ? (!rg.above
+              ? `나스닥100(QQQ) 최신 종가 ${rg.close.toFixed(2)}가 ${settings.regimeMaLen}일선 ${rg.ma.toFixed(2)} 아래라 부스터와 POOL 재투자가 모두 정지된 상태입니다. 주간 정액 적립금은 그대로 들어갑니다. 선 위로 올라온 뒤 ${rg.exitDays}거래일 연속 유지돼야 해제되며, 복귀 후 가속 매수는 하지 않습니다.`
+              : `선 위로 올라왔지만 아직 ${rg.nextAboveRun}/${rg.exitDays}거래일이라 잠금이 유지됩니다. ${rg.exitDays - rg.nextAboveRun}거래일 더 선 위에 있으면 해제됩니다. 하락 도중의 짧은 반등에 잠금이 풀려 부스터가 살아나는 것을 막기 위한 장치입니다.`)
+            : rg.locked
+              ? `선 위에서 ${rg.exitDays}거래일 연속 마감해 다음 거래일부터 잠금이 풀립니다. 그날부터 부스터와 POOL 재투자가 다시 동작합니다.`
             : !rg.above
               ? `나스닥100(QQQ) 최신 종가 ${rg.close.toFixed(2)}가 ${settings.regimeMaLen}일선 ${rg.ma.toFixed(2)}보다 ${Math.abs(rg.gapPct).toFixed(1)}% 아래로 내려갔습니다. 잠금은 전일 종가로 판정하므로 다음 거래일부터 부스터와 POOL 재투자가 멈춥니다(매도는 하지 않음). 이후 선 위로 올라와도 ${rg.exitDays}거래일 연속 유지돼야 풀립니다.`
-              : `나스닥100(QQQ) 전일 종가 ${rg.close.toFixed(2)}가 ${settings.regimeMaLen}일선 ${rg.ma.toFixed(2)}보다 ${rg.gapPct.toFixed(1)}% 위라 국면 필터는 대기 중입니다. 종가가 ${rg.ma.toFixed(2)} 아래로 내려가면 다음 날부터 부스터와 POOL 재투자가 멈춥니다(매도는 하지 않음). 이후 선 위로 올라와도 ${rg.exitDays}거래일 연속 유지돼야 풀립니다.`}
+              : `나스닥100(QQQ) 최신 종가 ${rg.close.toFixed(2)}가 ${settings.regimeMaLen}일선 ${rg.ma.toFixed(2)}보다 ${rg.gapPct.toFixed(1)}% 위라 국면 필터는 대기 중입니다. 종가가 ${rg.ma.toFixed(2)} 아래로 내려가면 다음 날부터 부스터와 POOL 재투자가 멈춥니다(매도는 하지 않음). 이후 선 위로 올라와도 ${rg.exitDays}거래일 연속 유지돼야 풀립니다.`}
         </p>
       )}
       <p style={{ color: '#9ca3af', fontSize: 12, textAlign: 'left', marginTop: 10 }}>

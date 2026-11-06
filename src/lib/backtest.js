@@ -950,6 +950,11 @@ export function getRegimeStatus(settings = DEFAULT_SETTINGS) {
     if (dw >= dwellDays) { lockState = true; aboveRun = 0; }
     else { aboveRun++; if (aboveRun >= exitDays) lockState = false; }
   }
+  // 잠금은 전일 종가로 판정하므로 최신 종가는 다음 거래일에 반영된다. 같은 상태기계를 한 칸 더 돌린다.
+  const below = last[1] < ma;
+  const nextDwell = below ? dwell + 1 : 0;
+  const nextAboveRun = nextDwell >= dwellDays ? 0 : aboveRun + 1;
+  const nextLock = nextDwell >= dwellDays ? true : nextAboveRun >= exitDays ? false : lockState;
   return {
     enabled: !!settings.regimeEnabled,
     date: last[0], close: last[1], ma,
@@ -957,6 +962,8 @@ export function getRegimeStatus(settings = DEFAULT_SETTINGS) {
     above: last[1] > ma,
     dwell, dwellDays, exitDays, aboveRun,
     locked: !!settings.regimeEnabled && lockState,
+    lockedNext: !!settings.regimeEnabled && nextLock,
+    nextDwell, nextAboveRun,
   };
 }
 
@@ -984,12 +991,19 @@ export function getBoosterStatus(settings = DEFAULT_SETTINGS) {
   const daysUntilRolloff = Math.max(0, lookback - daysSincePeak - 1);
 
   // 과열 스로틀. 부스터가 켜져 있으면 스로틀은 적용되지 않으므로(백테스트 로직과 동일)
-  // 실제 이번 주 수요일에 적용될 재투자 비율은 부스터 > 스로틀 > 기본 5% 순으로 결정된다.
+  // 실제 이번 주 수요일에 적용될 재투자 비율은 부스터 > 스로틀 > 기본 5% 순으로 결정되고,
+  // 추세국면 잠금이 걸리면 그 결과를 다시 누른다(백테스트 루프의 locked 분기와 동일).
   const rsiNow = _rsi[lastIdx];
   const firstTier = throttleFirstTier(settings);
   const throttlePct = throttlePctForRsi(rsiNow, settings);
   const throttleOn = !boosterOn && throttlePct !== null;
-  const effectivePoolPct = boosterOn ? ratioPct : (throttleOn ? throttlePct : BASE_POOL_RATIO * 100);
+  const regimeLocked = getRegimeStatus(settings).lockedNext;
+  const regimeBoostPct = settings.regimeBoostPct ?? DEFAULT_SETTINGS.regimeBoostPct;
+  const regimePoolStop = settings.regimePoolStop ?? DEFAULT_SETTINGS.regimePoolStop;
+  const unlockedPct = boosterOn ? ratioPct : (throttleOn ? throttlePct : BASE_POOL_RATIO * 100);
+  const effectivePoolPct = !regimeLocked ? unlockedPct
+    : boosterOn ? Math.min(ratioPct, regimeBoostPct)
+    : regimePoolStop ? 0 : unlockedPct;
 
   return {
     date: TQQQ_DATA[lastIdx][0], price, lookback, drawdownPct,
@@ -997,7 +1011,7 @@ export function getBoosterStatus(settings = DEFAULT_SETTINGS) {
     rollMax, rollMaxDate: TQQQ_DATA[hiIdx][0],
     ddNow, boosterOn, offPrice, offPct: (offPrice / price - 1) * 100,
     daysSincePeak, daysUntilRolloff, enabled: !!settings.enabled,
-    rsiNow, throttleOn, throttlePct, effectivePoolPct,
+    rsiNow, throttleOn, throttlePct, effectivePoolPct, regimeLocked,
     throttleEnabled: !!settings.throttleEnabled,
     throttleRsi: firstTier ? firstTier[0] : null,
     throttleFirstPct: firstTier ? firstTier[1] : null,
