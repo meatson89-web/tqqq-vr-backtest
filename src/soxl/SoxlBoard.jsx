@@ -57,7 +57,8 @@ export default function SoxlBoard() {
   const tr = sim.trades
   const winRate = tr.length ? tr.filter(t => t.ret > 0).length / tr.length : null
   const yearAgo = new Date(new Date(last[0]).getTime() - 365 * 864e5).toISOString()
-  const hard12 = tr.filter(t => t.why === '하드스탑' && t.t1 >= yearAgo).length
+  const isLoss = t => t.why === '하드스탑' || t.why === '해제청산'
+  const hard12 = tr.filter(t => isLoss(t) && t.t1 >= yearAgo).length
 
   // 내 보유
   const avg = +h.avg, qty = +h.qty
@@ -74,7 +75,9 @@ export default function SoxlBoard() {
   const armed = has && peak >= armPx
   const stop = armed ? peak * (1 - p.trail / 100) : avg * (1 - p.hard / 100)
   const ret = has ? px / avg - 1 : null
-  const exit = has && px <= stop
+  const hit = has && px <= stop
+  const hold = hit && !armed && !nextBull // 진입 차단 중 하드스탑 → 해제까지 매도 보류
+  const exit = hit && !hold
 
   // 차트
   const data = useMemo(() => barsRaw.map((b, i) => ({ i, t: b[0], c: b[1], rsi: sim.rsi[i] })), [sim])
@@ -113,8 +116,8 @@ export default function SoxlBoard() {
         <div className="mn-tile">
           <div className="k">모델 포지션 (규칙대로 매매했다면)</div>
           {sim.open ? <>
-            <div className="v">{sim.open.armed ? '보유 · 트레일' : '보유 · 발동 전'}</div>
-            <div className="n">진입 {ny(sim.open.t0)} @ {usd(sim.open.p0)} · 평가 {pct(last[1] / sim.open.p0 - 1)}</div>
+            <div className={`v ${sim.open.wait ? 'neg' : ''}`}>{sim.open.wait ? '보유 · 손절 보류' : sim.open.armed ? '보유 · 트레일' : '보유 · 발동 전'}</div>
+            <div className="n">진입 {ny(sim.open.t0)} @ {usd(sim.open.p0)} · 평가 {pct(last[1] / sim.open.p0 - 1)}{sim.open.wait ? ` · ${ny(sim.open.waitT)} 하드스탑 도달, 차단 해제 후 첫 1시간봉 종가에 매도` : ''}</div>
           </> : <>
             <div className="v">{signalNow ? '진입 신호' : '현금'}</div>
             <div className="n">{tr.length ? `마지막 청산 ${ny(tr.at(-1).t1)} ${tr.at(-1).why} ${pct(tr.at(-1).ret)}` : '데이터 기간 내 매매 없음'}</div>
@@ -141,9 +144,11 @@ export default function SoxlBoard() {
       </div>
 
       {has ? (
-        <div className={`dd-state ${exit ? 'B' : armed ? 'A' : 'C'}`}>
-          <span className={`dd-pill ${exit ? 'B' : armed ? 'A' : 'C'}`}>{exit ? '청산 신호' : armed ? '보유 · 트레일링 작동' : '보유 · 발동 전'}</span>
-          <p>{exit
+        <div className={`dd-state ${exit || hold ? 'B' : armed ? 'A' : 'C'}`}>
+          <span className={`dd-pill ${exit || hold ? 'B' : armed ? 'A' : 'C'}`}>{hold ? '손절 보류' : exit ? '청산 신호' : armed ? '보유 · 트레일링 작동' : '보유 · 발동 전'}</span>
+          <p>{hold
+            ? `현재가 ${usd(px)}가 하드스탑 ${usd(stop)} 이하지만 진입 차단 중이라 매도를 보류합니다. SOX 종가가 200일선(${soxReg.sma.toFixed(0)}) 위로 올라서면 다음 거래일 첫 1시간봉 종가에 전량 매도합니다.`
+            : exit
             ? `현재가 ${usd(px)}가 ${armed ? '트레일 스탑' : '하드스탑'} ${usd(stop)} 이하입니다. 1시간봉 종가 기준이면 규칙상 전량 청산입니다.`
             : armed
               ? `+${p.arm}%를 넘어 트레일링이 켜졌습니다. 1시간봉 종가가 ${usd(stop)} (최고 ${usd(peak)} −${p.trail}%) 이하로 마감하면 청산.`
@@ -209,16 +214,16 @@ export default function SoxlBoard() {
       <div className="mn-tw"><table>
         <thead><tr><th style={{ textAlign: 'left' }}>진입 (뉴욕, 봉 마감)</th><th>진입가</th><th style={{ textAlign: 'left' }}>청산 (뉴욕)</th><th>청산가</th><th>손익</th><th className="c">사유</th></tr></thead>
         <tbody>
-          {sim.open && <tr><td style={{ textAlign: 'left' }}>{ny(sim.open.t0)}</td><td>{usd(sim.open.p0)}</td><td style={{ textAlign: 'left' }} className="dim">보유 중</td><td>{usd(last[1])}</td><td className={cls(last[1] / sim.open.p0 - 1)}>{pct(last[1] / sim.open.p0 - 1)}</td><td className="c dim">—</td></tr>}
+          {sim.open && <tr><td style={{ textAlign: 'left' }}>{ny(sim.open.t0)}</td><td>{usd(sim.open.p0)}</td><td style={{ textAlign: 'left' }} className="dim">보유 중</td><td>{usd(last[1])}</td><td className={cls(last[1] / sim.open.p0 - 1)}>{pct(last[1] / sim.open.p0 - 1)}</td><td className="c dim">{sim.open.wait ? '손절 보류' : '—'}</td></tr>}
           {tr.slice().reverse().map(t => (
-            <tr key={t.i0} className={t.why === '하드스탑' ? 'sx-lose' : ''}>
+            <tr key={t.i0} className={isLoss(t) ? 'sx-lose' : ''}>
               <td style={{ textAlign: 'left' }}>{ny(t.t0)}</td><td>{usd(t.p0)}</td><td style={{ textAlign: 'left' }}>{ny(t.t1)}</td><td>{usd(t.p1)}</td>
               <td className={cls(t.ret)}>{pct(t.ret)}</td><td className="c">{t.why}</td></tr>
           ))}
         </tbody>
       </table></div>
       <p className="mn-note">야후 1시간봉(2023-11~)으로 계산. 2023-12~2026-08 구간을 점검에 쓴 Polygon 시간봉과 비교하면 27건 중 24건이 같고, 3건은 진입 시각·손익이 조금 다르며 야후에만 1건이 더 있다.
-        RSI가 문턱에 걸치는 봉은 데이터 출처에 따라 신호가 갈릴 수 있으니, 실제 진입은 증권사 차트의 1시간봉 종가로 확인할 것. 수수료 편도 0.05%, 세금 제외.</p>
+        RSI가 문턱에 걸치는 봉은 데이터 출처에 따라 신호가 갈릴 수 있으니, 실제 진입은 증권사 차트의 1시간봉 종가로 확인할 것. 수수료 편도 0.05%, 세금 제외. 사유 '해제청산'은 진입 차단 중 하드스탑에 닿아 보류했다가 차단이 풀린 첫 1시간봉 종가에 판 거래다.</p>
     </div>
   )
 }

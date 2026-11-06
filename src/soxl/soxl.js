@@ -1,6 +1,7 @@
 // SOXL 추천C — 1시간봉 RSI 눌림 매수 + SOX 200일선 필터 + 조건부 트레일링 (Pine 'SOXL C 최종'과 같은 순서)
 //   진입: RSI(12) ≤ 문턱 AND 전일 SOX 종가 > SOX 200일 SMA
 //   청산: +10% 도달 후 보유 중 고점 대비 -3% / 발동 전 진입가 -30%. 모두 종가 판정.
+//   손절 보류: 진입 차단 중 -30%에 닿으면 팔지 않고, 차단이 풀린 첫 1시간봉 종가에 전량 매도 (2026-11-06 채택)
 export const DEF = { rsiLen: 12, rsiTh: 25, arm: 10, trail: 3, hard: 30, maLen: 200, fee: 0.0005 }
 
 // Wilder RSI (TradingView ta.rsi와 같은 RMA). 마지막 평균 상승·하락폭도 돌려준다.
@@ -49,7 +50,7 @@ export function simulate(bars, sox, p = DEF) {
     const prev = j > 0 ? reg.get(soxDates[j - 1]) : null
     bull[i] = !!prev?.bull
   }
-  let cash = 10000, sh = 0, inPos = false, armed = false, entry = 0, peak = 0, ei = -1
+  let cash = 10000, sh = 0, inPos = false, armed = false, entry = 0, peak = 0, ei = -1, wait = false, waitI = -1
   const trades = [], eq = new Array(bars.length)
   for (let i = 0; i < bars.length; i++) {
     const px = c[i]
@@ -57,10 +58,13 @@ export function simulate(bars, sox, p = DEF) {
       peak = Math.max(peak, px)
       if (!armed && px / entry - 1 >= p.arm / 100) armed = true
       const stop = armed ? peak * (1 - p.trail / 100) : entry * (1 - p.hard / 100)
-      if (px <= stop) {
+      if (armed) wait = false // 보류 중 +10%에 닿으면 트레일링 규칙으로 돌아간다
+      if (!armed && !wait && px <= stop && !bull[i]) { wait = true; waitI = i }
+      const released = wait && bull[i]
+      if (released || (!wait && px <= stop)) {
         cash = sh * px * (1 - p.fee); sh = 0
-        trades.push({ i0: ei, i1: i, t0: bars[ei][0], t1: bars[i][0], p0: entry, p1: px, ret: px / entry - 1, why: armed ? '트레일링' : '하드스탑' })
-        inPos = false; armed = false
+        trades.push({ i0: ei, i1: i, t0: bars[ei][0], t1: bars[i][0], p0: entry, p1: px, ret: px / entry - 1, why: released ? '해제청산' : armed ? '트레일링' : '하드스탑' })
+        inPos = false; armed = false; wait = false
       }
     }
     if (!inPos && r[i] != null && r[i] <= p.rsiTh && bull[i]) {
@@ -69,7 +73,7 @@ export function simulate(bars, sox, p = DEF) {
     }
     eq[i] = cash + sh * px
   }
-  const open = inPos ? { i0: ei, t0: bars[ei][0], p0: entry, peak, armed } : null
+  const open = inPos ? { i0: ei, t0: bars[ei][0], p0: entry, peak, armed, wait, waitT: wait ? bars[waitI][0] : null } : null
   return { rsi: r, g, l, bull, trades, open, eq, reg }
 }
 

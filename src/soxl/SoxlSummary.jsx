@@ -57,9 +57,10 @@ export default function SoxlSummary() {
         <div><span>트레일 발동</span><b>+10%</b><em>보유 중 종가가 진입가 +10% 도달</em></div>
         <div><span>익절</span><b>고점 −3%</b><em>발동 후 보유 중 최고 종가 대비</em></div>
         <div><span>손절</span><b>진입가 −30%</b><em>발동 전에만 적용 (하드스탑)</em></div>
+        <div><span>손절 보류</span><b>차단 해제 시 매도</b><em>진입 차단 중 −30% 도달 시 보류, 해제 후 첫 1시간봉 종가에 전량 매도</em></div>
       </div>
       <p className="mn-note">증권사 스탑주문을 걸지 않는다. 같은 −3%를 장중 스탑으로 걸면 꼬리에 잘려 성과가 무너진다. 1시간봉 종가를 보고 직접 판단.
-        (09-06 v3 파인 스크립트는 문턱 25.5, 이 점검은 25 기준이다.)</p>
+        (09-06 v3 파인 스크립트는 문턱 25.5, 이 점검은 25 기준이다.) 손절 보류는 2026-11-06에 추가한 규칙으로, 아래 09-21 점검 수치에는 반영되지 않았다.</p>
 
       <div className="mn-rail">
         <div className="mn-tile"><div className="k">최근 5년 재현 (시간봉)</div><div className="v">32.4<small>배</small></div><div className="n">$324,080 · MDD −40.8% · 39매매 37승 · 하드스탑 2건</div></div>
