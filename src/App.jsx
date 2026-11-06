@@ -606,8 +606,10 @@ function BoosterStatusPanel({ settings }) {
               ? (rg.dwell > 0
                 ? `이탈 ${rg.dwell}일째 · POOL 지출 정지`
                 : `해제 대기 ${rg.aboveRun}/${rg.exitDays}일 · 아직 정지`)
-              : `선 위 ${rg.gapPct >= 0 ? '+' : ''}${rg.gapPct.toFixed(1)}% · 정상`}
-            tone={rg.locked ? 'warn' : undefined}
+              : rg.above
+                ? `선 위 +${rg.gapPct.toFixed(1)}% · 정상`
+                : `선 아래 ${rg.gapPct.toFixed(1)}% · 다음 거래일부터 POOL 지출 정지`}
+            tone={rg.locked || !rg.above ? 'warn' : undefined}
           />
         )}
       </div>
@@ -617,7 +619,9 @@ function BoosterStatusPanel({ settings }) {
             ? (rg.dwell > 0
               ? `나스닥100(QQQ) 전일 종가 ${rg.close.toFixed(2)}가 ${settings.regimeMaLen}일선 ${rg.ma.toFixed(2)} 아래라 부스터와 POOL 재투자가 모두 정지된 상태입니다. 주간 정액 적립금은 그대로 들어갑니다. 선 위로 올라온 뒤 ${rg.exitDays}거래일 연속 유지돼야 해제되며, 복귀 후 가속 매수는 하지 않습니다.`
               : `선 위로 올라왔지만 아직 ${rg.aboveRun}/${rg.exitDays}거래일이라 잠금이 유지됩니다. ${rg.exitDays - rg.aboveRun}거래일 더 선 위에 있으면 해제됩니다. 하락 도중의 짧은 반등에 잠금이 풀려 부스터가 살아나는 것을 막기 위한 장치입니다.`)
-            : `나스닥100(QQQ) 전일 종가 ${rg.close.toFixed(2)}가 ${settings.regimeMaLen}일선 ${rg.ma.toFixed(2)}보다 ${rg.gapPct.toFixed(1)}% 위라 국면 필터는 잠자입니다. 종가가 ${rg.ma.toFixed(2)} 아래로 내려가면 다음 날부터 부스터와 POOL 재투자가 멈춥니다(매도는 하지 않음). 이후 선 위로 올라와도 ${rg.exitDays}거래일 연속 유지돼야 풀립니다.`}
+            : !rg.above
+              ? `나스닥100(QQQ) 최신 종가 ${rg.close.toFixed(2)}가 ${settings.regimeMaLen}일선 ${rg.ma.toFixed(2)}보다 ${Math.abs(rg.gapPct).toFixed(1)}% 아래로 내려갔습니다. 잠금은 전일 종가로 판정하므로 다음 거래일부터 부스터와 POOL 재투자가 멈춥니다(매도는 하지 않음). 이후 선 위로 올라와도 ${rg.exitDays}거래일 연속 유지돼야 풀립니다.`
+              : `나스닥100(QQQ) 전일 종가 ${rg.close.toFixed(2)}가 ${settings.regimeMaLen}일선 ${rg.ma.toFixed(2)}보다 ${rg.gapPct.toFixed(1)}% 위라 국면 필터는 대기 중입니다. 종가가 ${rg.ma.toFixed(2)} 아래로 내려가면 다음 날부터 부스터와 POOL 재투자가 멈춥니다(매도는 하지 않음). 이후 선 위로 올라와도 ${rg.exitDays}거래일 연속 유지돼야 풀립니다.`}
         </p>
       )}
       <p style={{ color: '#9ca3af', fontSize: 12, textAlign: 'left', marginTop: 10 }}>
