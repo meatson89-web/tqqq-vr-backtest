@@ -303,3 +303,8 @@ header .sub {
 .status-badge.triggered { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
 .gain-form { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
 .gain-form input { font: inherit; font-size: 14px; padding: 7px 10px; border-radius: 6px; border: 1px solid #2e303a; background: #16182a; color: #f3f4f6; width: 110px; }
+
+/* 본문이 내용 폭만큼 늘어나 페이지 전체가 밀리지 않게 한다. 넓은 표는 표 영역만 스크롤. */
+@media (max-width: 560px) { .main-content { width: 100%; } }
+.page { box-sizing: border-box; width: 100%; }
+.info-body { overflow-x: auto; }

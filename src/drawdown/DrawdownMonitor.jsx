@@ -176,6 +176,7 @@ export default function DrawdownMonitor() {
     r3: mean(sel.map(m => m.o.r3)), r6: mean(sel.map(m => m.o.r6)), r12: mean(sel.map(m => m.o.r12)),
   }
   // 비교용: 과거 사례 전체(사건마다 가장 닮은 날)의 단순 평균. 검증해 보니 6개월·1년 수익은 닮은 몇 곳보다 이쪽이 더 잘 맞았다.
+  const pastN = res.all.length || baseE.length // 진행 중인 이번 하락은 비교 대상이 아니다
   const allAvg = { n: res.all.length, r6: mean(res.all.map(m => m.o.r6)), r12: mean(res.all.map(m => m.o.r12)) }
   const cls = v => v == null ? '' : v >= 0 ? 'pos' : 'neg'
 
@@ -183,7 +184,7 @@ export default function DrawdownMonitor() {
     <div className="monitor dd">
       <div className="mn-head">
         <h2>하락장 모니터 — 지금과 닮은 과거 하락</h2>
-        <span className="mn-sub">데이터 {asof}까지 · 매일 자동 갱신 · 비교 대상 = TQQQ 상장 이후 QQQ 10%+ 하락 {baseE.length}건</span>
+        <span className="mn-sub">데이터 {asof}까지 · 매일 자동 갱신 · 비교 대상 = TQQQ 상장 이후 QQQ 10%+ 하락 {pastN}건</span>
       </div>
 
       <div className="mn-tabs">
@@ -229,7 +230,9 @@ export default function DrawdownMonitor() {
           const e = st.last, s = res.s, n = st.n
           return <>
             <p>{ph === 'B'
-              ? `QQQ가 ${s.D[e.pk]} 고점에서 ${pct(st.f.qmin, 1)}까지 빠졌고, 지금은 고점 대비 ${pct(st.f.qdd, 1)}입니다. 고점 후 ${span(st.f.days)} 지났습니다.`
+              ? (pct(st.f.qmin, 1) === pct(st.f.qdd, 1)
+                ? `QQQ가 ${s.D[e.pk]} 고점 대비 ${pct(st.f.qdd, 1)}로, 지금이 이번 하락의 최저 수준입니다. 고점 후 ${span(st.f.days)} 지났습니다.`
+                : `QQQ가 ${s.D[e.pk]} 고점에서 ${pct(st.f.qmin, 1)}까지 빠졌고, 지금은 고점 대비 ${pct(st.f.qdd, 1)}입니다. 고점 후 ${span(st.f.days)} 지났습니다.`)
               : `QQQ는 ${s.D[e.rec]}에 전고점을 되찾았지만, TQQQ는 하락 직전 고점(${s.D[e.tp]}) 대비 아직 ${pct(st.f.tdd, 1)}입니다. QQQ 회복 후 ${span(st.f.since)} 지났습니다.`}</p>
             <div className="dd-kv">
               <div><span>기준일</span><b>{s.D[n]}</b></div>
@@ -330,7 +333,7 @@ export default function DrawdownMonitor() {
       </>}
 
       <div className="mn-warn">
-        <b>예측이 아닙니다.</b> 비교 대상은 2010년 이후 하락 {baseE.length}건뿐이고, 모두 결국 회복한 기록입니다. 2000~2002년처럼 회복까지 15년 걸린 하락은 들어 있지 않습니다. "과거에는 이런 범위였다"로만 보세요.
+        <b>예측이 아닙니다.</b> 비교 대상은 2010년 이후 하락 {pastN}건뿐이고, 모두 결국 회복한 기록입니다. 2000~2002년처럼 회복까지 15년 걸린 하락은 들어 있지 않습니다. "과거에는 이런 범위였다"로만 보세요.
       </div>
       <div className="mn-src">
         <b>판정</b> 정상 = QQQ 10%+ 하락 중이 아니고 직전 하락에서 TQQQ도 회복 · QQQ 하락 중 = QQQ가 최고가 대비 10% 이상 빠진 뒤 아직 최고가 회복 전 · TQQQ 회복 전 = QQQ는 최고가를 넘었지만 TQQQ는 하락 직전 고점 아래.

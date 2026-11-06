@@ -55,10 +55,12 @@ export default function SoxlBoard() {
 
   // 감시 기준 (이 데이터 기간 안의 모델 매매)
   const tr = sim.trades
-  const winRate = tr.length ? tr.filter(t => t.ret > 0).length / tr.length : null
+  const waiting = sim.open?.wait ? 1 : 0 // 손절 보류 중인 포지션은 끝나지 않았어도 손절로 센다
+  const nTrades = tr.length + waiting
+  const winRate = nTrades ? tr.filter(t => t.ret > 0).length / nTrades : null
   const yearAgo = new Date(new Date(last[0]).getTime() - 365 * 864e5).toISOString()
   const isLoss = t => t.why === '하드스탑' || t.why === '해제청산'
-  const hard12 = tr.filter(t => isLoss(t) && t.t1 >= yearAgo).length
+  const hard12 = tr.filter(t => isLoss(t) && t.t1 >= yearAgo).length + waiting
 
   // 내 보유
   const avg = +h.avg, qty = +h.qty
@@ -126,8 +128,8 @@ export default function SoxlBoard() {
         </div>
         <div className="mn-tile">
           <div className="k">감시 기준 (데이터 기간 {nyDate(barsRaw[0][0]).slice(0, 7)}~)</div>
-          <div className={`v ${winRate < 0.76 || hard12 >= 3 ? 'neg' : ''}`}>{pct(winRate, 0).replace('+', '')}<small> 승률 · 12개월 손절 {hard12}건</small></div>
-          <div className="n">승률 76% 아래 또는 12개월 손절 3건 이상이면 경고 · 모델 {tr.length}매매</div>
+          <div className={`v ${winRate < 0.76 || hard12 >= 3 ? 'neg' : ''}`}>{pct(winRate, 0).replace('+', '')}<small> 승률 · 12개월 손절 {hard12}건{waiting ? ' (보류 1건 포함)' : ''}</small></div>
+          <div className="n">승률 76% 아래 또는 12개월 손절 3건 이상이면 경고 · 모델 {nTrades}매매</div>
         </div>
       </div>
 

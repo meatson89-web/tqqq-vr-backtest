@@ -99,7 +99,7 @@ export function smaSkipNull(arr, n) {
 /**
  * 이격도·RSI (MA 기간 가변).
  * 이격도는 매도 전략(backtest.js calcDisparity)과 완전히 같은 정의를 쓴다 —
- * TQQQ 종가가 자기 ma일선에서 몇 % 떨어져 있는가. 0 = 선 위, +40 = 매도선.
+ * TQQQ 종가가 자기 ma일선에서 몇 % 떨어져 있는가. 0 = 선과 같음, +40 = 매도선.
  * TQQQ 자체 이동평균이라 상장 +ma거래일 전까지는 값이 없다(전략도 그때는 못 판다).
  */
 export function addIndicators(rows, ma = 180, rsiN = 14) {
@@ -107,7 +107,7 @@ export function addIndicators(rows, ma = 180, rsiN = 14) {
   const m = smaSkipNull(px, ma);
   const rs = wilderRsi(px, rsiN);
   rows.forEach((r, i) => {
-    r.disp = m[i] ? +((r.px / m[i] - 1) * 100).toFixed(2) : null;
+    r.disp = m[i] ? (r.px / m[i] - 1) * 100 : null; // 표시할 때만 반올림 (매도 상황판과 값이 같아야 한다)
     r.rsi = rs[i] == null ? null : +rs[i].toFixed(1);
   });
   return rows;
