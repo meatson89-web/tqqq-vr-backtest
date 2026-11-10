@@ -1,6 +1,6 @@
 import tqqqRaw from '../data/tqqq.json' with { type: 'json' };
 // QQQ로 1999년까지 역산한 합성 TQQQ. 실제 TQQQ는 2010-02부터라 닷컴·금융위기가 없다.
-// 생성: python scripts/build-sim-tqqq.py (3배 곱이 아니라 차입비용까지 반영)
+// 생성: node scripts/build-sim-tqqq.mjs (3배 곱이 아니라 차입비용까지 반영)
 import tqqqSimRaw from '../data/tqqq_sim.json' with { type: 'json' };
 // 200일선 국면 판정용 나스닥100. TQQQ 자신이 아니라 지수를 쓴다 —
 // 3배 ETF의 MA는 길이에 따라 결과가 심하게 흔들려 과최적화가 된다.
@@ -54,6 +54,22 @@ function calcMDD(series) {
   return mdd;
 }
 
+// 적립금을 뺀 단위가치 기준 MDD. 총자산 기준(calcMDD)은 새로 넣은 적립금이 낙폭을 메워
+// 초기자산 대비 적립금이 큰 5년 창에서 최대 약 10%p 얕게 나온다(2001년 시작 창 -88% → -97%).
+function calcMDDExDeposits(daily) {
+  let unit = 1, peak = 1, mdd = 0, prevTotal = null, prevIn = 0;
+  for (const d of daily) {
+    const dep = d.totalIn - prevIn;
+    prevIn = d.totalIn;
+    if (prevTotal !== null && prevTotal > 0) unit *= (d.total - dep) / prevTotal;
+    prevTotal = d.total;
+    if (unit > peak) peak = unit;
+    const dd = (unit / peak - 1) * 100;
+    if (dd < mdd) mdd = dd;
+  }
+  return mdd;
+}
+
 // Rolling max over trailing `period` closes (inclusive of current day)
 function calcRollMax(closes, period) {
   const out = new Array(closes.length).fill(NaN);
@@ -73,7 +89,7 @@ export const DATA_END = TQQQ_DATA[TQQQ_DATA.length - 1][0];
 export const SIM_START = SIM_DATA[0][0];
 
 // 전략 파라미터 기본값 (전부 UI에서 조정 가능)
-//  - 부스터: 60거래일 고점 대비 -30%↓ 시 주간 POOL 재투자 비율을 5%→100%로 상향
+//  - 부스터: 252거래일 고점 대비 -30%↓ 시 주간 POOL 재투자 비율을 5%→100%로 상향
 //  - initialKRW: 시작일 일시 매수 초기 투입금 (기본 1억)
 //  - weeklyKRW: 수요일 정액 적립금 (기본 85만원)
 export const DEFAULT_SETTINGS = {
@@ -107,8 +123,21 @@ export const DEFAULT_SETTINGS = {
   // 만족해야 부스터가 켜진다 — 낙폭은 컸지만 이미 반등이 시작된 주를 걸러내려는 것.
   boostRsiMax: null,
   initialKRW: 100_000_000, weeklyKRW: 850_000,
+  // 거래비용: 편도 %(수수료+환전 스프레드+슬리피지 합산 가정). 매수·매도 양쪽에 붙는다.
+  // 0이면 예전 결과와 같다. 0.1%는 전체구간 최종자산을 약 -1.8% 낮춘다(2026-11 감사).
+  feePct: 0.1,
+  // 정액 적립·POOL 판정 요일(1=월 … 5=금). 기본 수요일. 정액 적립 자체는 요일을 타지 않지만
+  // 부스터는 "그 요일 하루의 종가"로 POOL 전액 투입을 정하므로 요일에 따라 결과가 크게 갈린다.
+  // 화면의 "요일·임계 분포"가 이 값을 바꿔 가며 다시 돌린다.
+  buyWeekday: 3,
+  // 신호 지연 거래일 수(민감도 점검용, 기본 0). 0이면 RSI·이격도·부스터 낙폭을 당일 종가로
+  // 계산하고 같은 종가에 체결한다고 가정한다(장 마감 직전 주문). 1이면 전일 종가 신호로
+  // 당일 종가에 체결한다. 지연을 주면 daily/trades에 기록되는 지표값도 지연된 값이다.
+  signalLagDays: 0,
   // 수익실현 매도 RSI 임계. 70 → 73으로 올렸다.
-  // 71~75가 연속으로 개선되는 "고원"이지 단일 봉우리가 아니다. 70에서만 걸리던
+  // ※ 2026-11 감사: "71~75 고원"이라던 예전 서술은 현재 데이터와 맞지 않는다. 72 이하는
+  //   뚜렷이 나쁘고 74~79가 73보다 낫지만 들쭉날쭉하며 80에서 절벽이다(좁은 능선).
+  //   73은 그 능선의 아래쪽 끝이다. 70에서만 걸리던
   // 매도 12건 중 7건은 이후 낙폭이 -13% 이내여서 세금만 내고 끝났을 거래였다.
   // POOL 재투입이 주 5%로 느려서, 일찍 팔아 폭락을 피해 번 것보다 반등에 못
   // 올라타 잃은 게 컸다. 23창 재측정: scripts/sweep-sellrsi.mjs
@@ -272,6 +301,17 @@ export const DEFAULT_SETTINGS = {
   //       복귀가 4번 있었고, 가속은 그때마다 ratioPct로 데드캣 바운스를 사들인다.
   regimeEnabled: true, regimeMaLen: 200, regimeDwellDays: 1, regimeExitDays: 3,
   regimeBoostPct: 0, regimePoolStop: true, regimeAccelWeeks: 0,
+  // 잠금 판정 시점. true = 당일 종가(2026-11 감사 후 기본), false = 전일 종가(예전 방식).
+  // RSI·이격도·부스터 낙폭은 모두 당일 종가로 판정하는데 잠금만 전일 종가였다. 그 하루 차이로
+  // "TQQQ는 이미 -30%인데 QQQ가 그날 처음 200일선을 깬 날"(2022-01-20)에 부스터가 잠금보다
+  // 먼저 터질 수 있었다. 수요일 기준으로는 그런 날이 없었지만 적립 요일만 목요일로 바꿔도
+  // 전체구간이 1254억 → 497억(MDD -82%)이 됐다. 당일 종가로 맞추면 5개 요일의 최저가
+  // 497억 → 839억, 요일 평균이 +13.2%가 된다(수수료 0 기준, 독립 재구현 측정).
+  // ※ 수익을 올리는 변경이 아니라 요일 운에 대한 보험이다. 지금 쓰는 수요일 기준으로는 전체구간
+  //   1233.3억 → 1222.5억(-0.9%), 23창 평균 -1.4%(개선 1·악화 12, 합성 2008-03·2009-03창 -15~-16%)다.
+  // ※ 근거는 2010년 이후에만 있다. 1999~2010 시작 5년창에서는 평균 -1.1%(34% 악화)로 효과가 없다.
+  //   이 위 주석의 성적·사건 서술(2022-01-26 등)은 전일 종가 방식일 때의 측정값이다.
+  regimeSameDay: true,
   // 선행 잠금(실험, 기본 OFF): 200일선 잠금은 후행 지표라 "선에서 멀리 떨어진
   // 고점에서의 첫 급락"(2000-01)과 "선 언저리 톱질"(2018-10)을 못 잡는다.
   // 이 규칙은 basis 시계열(tqqq|qqq)이 leadLockLookback일 고점 대비 leadLockPct%
@@ -423,11 +463,13 @@ function getRollMaxArr(lookback, data = TQQQ_DATA) {
 }
 
 // 날짜별 "나스닥100이 200일선 아래에 연속으로 며칠 있었나".
-// 전일 확정 종가로만 판정한다 — 당일 종가로 그날 매매를 정하면 미래를 쓰는 셈이다.
+// sameDay=true면 그날 종가로, false면 전일 종가로 판정한다. 체결이 당일 종가이고 다른 신호
+// (RSI·이격도·부스터 낙폭)도 당일 종가를 쓰므로 당일 종가 판정이 미래참조는 아니다.
 // 위로 올라오면 0으로 리셋된다.
 const _dwellCache = new Map();
-function getDwellByDate(maLen) {
-  const hit = _dwellCache.get(maLen);
+function getDwellByDate(maLen, sameDay = DEFAULT_SETTINGS.regimeSameDay) {
+  const cacheKey = `${maLen}:${sameDay ? 1 : 0}`;
+  const hit = _dwellCache.get(cacheKey);
   if (hit) return hit;
   const closes = qqqRaw.map(([, p]) => p);
   const ma = new Array(closes.length).fill(NaN);
@@ -439,17 +481,18 @@ function getDwellByDate(maLen) {
   }
   const m = new Map();
   let run = 0;
-  for (let i = 1; i < qqqRaw.length; i++) {
-    if (isNaN(ma[i - 1])) continue;
-    run = closes[i - 1] < ma[i - 1] ? run + 1 : 0;
+  for (let i = sameDay ? 0 : 1; i < qqqRaw.length; i++) {
+    const j = sameDay ? i : i - 1;
+    if (isNaN(ma[j])) continue;
+    run = closes[j] < ma[j] ? run + 1 : 0;
     m.set(qqqRaw[i][0], run);
   }
-  _dwellCache.set(maLen, m);
+  _dwellCache.set(cacheKey, m);
   return m;
 }
 
-function isWednesday(dateStr) {
-  return new Date(dateStr + 'T00:00:00Z').getUTCDay() === 3;
+function weekdayOf(dateStr) {
+  return new Date(dateStr + 'T00:00:00Z').getUTCDay();
 }
 
 // QQQ 종가를 백테스트 대상 데이터의 날짜에 맞춘 배열. 그 날짜에 QQQ 값이 없으면
@@ -534,6 +577,9 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   const relaxDays = relaxMonths * TRADING_DAYS_PER_MONTH;
 
   const taxEnabled = booster.taxEnabled ?? DEFAULT_SETTINGS.taxEnabled;
+  const feeFrac = (booster.feePct ?? DEFAULT_SETTINGS.feePct) / 100;
+  const buyWeekday = booster.buyWeekday ?? DEFAULT_SETTINGS.buyWeekday;
+  const signalLag = booster.signalLagDays ?? DEFAULT_SETTINGS.signalLagDays;
   const SELL_RSI = booster.sellRsi ?? DEFAULT_SETTINGS.sellRsi;
 
   const marketOffTiers = booster.marketOffEnabled
@@ -566,7 +612,8 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
 
   const regimeEnabled = !!booster.regimeEnabled;
   const dwellByDate = regimeEnabled
-    ? getDwellByDate(booster.regimeMaLen ?? DEFAULT_SETTINGS.regimeMaLen) : null;
+    ? getDwellByDate(booster.regimeMaLen ?? DEFAULT_SETTINGS.regimeMaLen,
+        booster.regimeSameDay ?? DEFAULT_SETTINGS.regimeSameDay) : null;
   const regimeDwellDays = booster.regimeDwellDays ?? DEFAULT_SETTINGS.regimeDwellDays;
   const regimeBoostFrac = (booster.regimeBoostPct ?? DEFAULT_SETTINGS.regimeBoostPct) / 100;
   const regimePoolStop = booster.regimePoolStop ?? DEFAULT_SETTINGS.regimePoolStop;
@@ -606,9 +653,14 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
   for (let i = startIdx; i < sliceEnd; i++) {
     const [date, priceUSD] = data[i];
     const price = priceUSD * 1350;
-    const rsi = _rsiArr[i];
-    const disp = _dispArr[i];
-    const rollMax = rollMaxArr ? rollMaxArr[i] : NaN;
+    // 수수료를 뗀 매도 단가. 양도차익도 이 값으로 계산한다(수수료는 필요경비).
+    const netPrice = price * (1 - feeFrac);
+    // 신호는 si(기본 = 당일) 종가로 계산하고, 체결은 항상 당일 종가다.
+    const si = Math.max(0, i - signalLag);
+    const sigPriceUSD = data[si][1];
+    const rsi = _rsiArr[si];
+    const disp = _dispArr[si];
+    const rollMax = rollMaxArr ? rollMaxArr[si] : NaN;
 
     // QQQ 휴장일 등으로 날짜가 안 맞으면 직전 값을 이어 쓴다.
     if (dwellByDate) dwell = dwellByDate.get(date) ?? dwell;
@@ -640,8 +692,8 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
 
     if (!started) {
       // Day 0: lump-sum initial buy
-      shares = initialKRW / price;
-      avgCost = price;
+      shares = initialKRW * (1 - feeFrac) / price;
+      avgCost = initialKRW / shares;
       totalIn = initialKRW;
       started = true;
       lastSellIdx = i;
@@ -652,23 +704,15 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
         const fromPool = Math.min(taxDue, pool);
         pool -= fromPool;
         if (taxDue > fromPool) {
-          const sellShares = Math.min(shares, (taxDue - fromPool) / price);
-          realizedGain += sellShares * (price - avgCost);
+          const sellShares = Math.min(shares, (taxDue - fromPool) / netPrice);
+          realizedGain += sellShares * (netPrice - avgCost);
           shares -= sellShares;
         }
         taxPaid += taxDue;
         taxDue = 0;
         taxDueYear = -1;
       }
-      // 연말(또는 백테스트 종료일)에 당해 실현손익으로 세액 확정
-      const isYearEnd = i + 1 >= sliceEnd || data[i + 1][0].slice(0, 4) !== date.slice(0, 4);
-      if (taxEnabled && isYearEnd) {
-        taxDue += Math.max(0, realizedGain - TAX_DEDUCTION) * TAX_RATE;
-        taxDueYear = +date.slice(0, 4) + 1;
-        realizedGain = 0;
-      }
-
-      const ret = avgCost > 0 ? (price - avgCost) / avgCost : 0;
+      const ret = avgCost > 0 ? (sigPriceUSD * 1350 - avgCost) / avgCost : 0;
       const relaxActive = relaxEnabled && (i - lastSellIdx >= relaxDays);
       const effRsi = relaxActive ? SELL_RSI - relaxRsiDrop : SELL_RSI;
       const effDisp = relaxActive ? SELL_DISP - relaxDispDrop : SELL_DISP;
@@ -689,10 +733,9 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
         const normalFire = !relaxActive || (rsi >= SELL_RSI && disp > SELL_DISP);
         const sellFrac = normalFire ? 0.70 : relaxSellFrac;
         const sellShares = shares * sellFrac;
-        const sellValue = sellShares * price;
-        realizedGain += sellShares * (price - avgCost);
+        realizedGain += sellShares * (netPrice - avgCost);
         shares -= sellShares;
-        pool += sellValue;
+        pool += sellShares * netPrice;
         cooldown = 10;
         sellNo++;
         lastSellIdx = i;
@@ -714,9 +757,9 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
         ) {
           const sellShares = shares * antSellFrac;
           const sellValue = sellShares * price;
-          realizedGain += sellShares * (price - avgCost);
+          realizedGain += sellShares * (netPrice - avgCost);
           shares -= sellShares;
-          pool += sellValue;
+          pool += sellShares * netPrice;
           cooldown = antCooldown;
           sellNo++;
           lastSellIdx = i;
@@ -741,9 +784,9 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
             const sellShares = shares * frac;
             if (sellShares <= 0) continue;
             const sellValue = sellShares * price;
-            realizedGain += sellShares * (price - avgCost);
+            realizedGain += sellShares * (netPrice - avgCost);
             shares -= sellShares;
-            pool += sellValue;
+            pool += sellShares * netPrice;
             sellNo++;
             marketOffTrades.push({
               date, priceUSD, gainPct: ret * 100, tier: thr, frac,
@@ -753,13 +796,23 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
         }
       }
 
-      // Weekly buy on Wednesdays: 적립금 + pool * 재투자비율(기본 5%, 부스터 조건 충족 시 상향)
-      if (isWednesday(date)) {
+      // 연말(또는 백테스트 종료일)에 당해 실현손익으로 세액 확정.
+      // 그날의 매도가 모두 끝난 뒤에 확정해야 한다 — 매도보다 먼저 확정하면 연말 마지막
+      // 거래일의 매도가 다음 해로 넘어가고, 종료일 매도는 과세되지 않는다.
+      const isYearEnd = i + 1 >= sliceEnd || data[i + 1][0].slice(0, 4) !== date.slice(0, 4);
+      if (taxEnabled && isYearEnd) {
+        taxDue += Math.max(0, realizedGain - TAX_DEDUCTION) * TAX_RATE;
+        taxDueYear = +date.slice(0, 4) + 1;
+        realizedGain = 0;
+      }
+
+      // 주 1회 매수(기본 수요일): 적립금 + pool * 재투자비율(기본 5%, 부스터 조건 충족 시 상향)
+      if (weekdayOf(date) === buyWeekday) {
         totalWeeks++;
         const poolRatioPct = booster.poolRatioPct ?? DEFAULT_SETTINGS.poolRatioPct;
         let poolRatio = poolRatioPct / 100;
         let wasBoosted = false;
-        if (boostFires(priceUSD, rollMax, rsi)) {
+        if (boostFires(sigPriceUSD, rollMax, rsi)) {
           boostedWeeks++;
           const confirm = booster.boostConfirmWeeks ?? DEFAULT_SETTINGS.boostConfirmWeeks;
           const confirmMode = booster.boostConfirmMode ?? DEFAULT_SETTINGS.boostConfirmMode;
@@ -795,7 +848,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
           });
         }
         const buyAmt = weeklyKRW + boost;
-        const newShares = buyAmt / price;
+        const newShares = buyAmt * (1 - feeFrac) / price;
         avgCost = (avgCost * shares + buyAmt) / (shares + newShares);
         shares += newShares;
         pool -= boost;
@@ -806,7 +859,7 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
 
     const stockValue = shares * price;
     const total = stockValue + pool;
-    const boostCond = boostFires(priceUSD, rollMax, rsi);
+    const boostCond = boostFires(sigPriceUSD, rollMax, rsi);
     // avgCost/gainPct는 원화 평단가와 그 대비 수익률. 마켓오프 규칙과 툴팁이 쓴다.
     const gainPct = avgCost > 0 ? (price - avgCost) / avgCost * 100 : NaN;
     daily.push({ date, priceUSD, rsi, disp, stockValue, pool, total, totalIn, boostCond, avgCost, gainPct, regimeLocked: locked });
@@ -829,7 +882,9 @@ export function runFinalBacktest(startDate, endDate, settings = DEFAULT_SETTINGS
     returnPct,
     returnAfterTaxPct: (finalAfterTax - totalIn) / totalIn * 100,
     irr,
-    mdd: calcMDD(daily.map(d => d.total)),
+    // mdd는 적립금 제외(단위가치) 기준. 예전 총자산 기준 값은 mddTotal로 남긴다.
+    mdd: calcMDDExDeposits(daily),
+    mddTotal: calcMDD(daily.map(d => d.total)),
     finalTotal: last.total,
     finalAfterTax,
     taxPaid: taxPaid + taxDue,
@@ -929,11 +984,12 @@ export function throttleFirstTier(settings = DEFAULT_SETTINGS) {
 }
 
 // ── 추세국면 상황판: 최신 QQQ 기준 현재 200일선 위/아래 ──────────────────────
-// 백테스트와 같은 판정을 쓴다 — 전일 확정 종가, 같은 dwell 카운터.
+// 백테스트와 같은 판정을 쓴다 — 같은 잠금 시점(regimeSameDay), 같은 dwell 카운터.
 export function getRegimeStatus(settings = DEFAULT_SETTINGS) {
   const maLen = settings.regimeMaLen ?? DEFAULT_SETTINGS.regimeMaLen;
   const dwellDays = settings.regimeDwellDays ?? DEFAULT_SETTINGS.regimeDwellDays;
-  const m = getDwellByDate(maLen);
+  const sameDay = settings.regimeSameDay ?? DEFAULT_SETTINGS.regimeSameDay;
+  const m = getDwellByDate(maLen, sameDay);
   const last = qqqRaw[qqqRaw.length - 1];
   const closes = qqqRaw.map(([, p]) => p);
   let sum = 0;
@@ -950,13 +1006,15 @@ export function getRegimeStatus(settings = DEFAULT_SETTINGS) {
     if (dw >= dwellDays) { lockState = true; aboveRun = 0; }
     else { aboveRun++; if (aboveRun >= exitDays) lockState = false; }
   }
-  // 잠금은 전일 종가로 판정하므로 최신 종가는 다음 거래일에 반영된다. 같은 상태기계를 한 칸 더 돌린다.
+  // 전일 종가 판정이면 최신 종가는 다음 거래일에 반영되므로 같은 상태기계를 한 칸 더 돌린다.
+  // 당일 종가 판정이면 최신 종가가 이미 반영돼 있어 "다음"이 곧 현재다.
   const below = last[1] < ma;
-  const nextDwell = below ? dwell + 1 : 0;
-  const nextAboveRun = nextDwell >= dwellDays ? 0 : aboveRun + 1;
-  const nextLock = nextDwell >= dwellDays ? true : nextAboveRun >= exitDays ? false : lockState;
+  const nextDwell = sameDay ? dwell : below ? dwell + 1 : 0;
+  const nextAboveRun = sameDay ? aboveRun : nextDwell >= dwellDays ? 0 : aboveRun + 1;
+  const nextLock = sameDay ? lockState
+    : nextDwell >= dwellDays ? true : nextAboveRun >= exitDays ? false : lockState;
   return {
-    enabled: !!settings.regimeEnabled,
+    enabled: !!settings.regimeEnabled, sameDay,
     date: last[0], close: last[1], ma,
     gapPct: (last[1] / ma - 1) * 100,
     above: last[1] > ma,

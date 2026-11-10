@@ -28,14 +28,20 @@ jobs:
       - name: Fetch latest TQQQ / QQQ price data
         run: node scripts/update-data.mjs
 
+      # 합성 TQQQ(1999~)를 방금 받은 QQQ·TQQQ로 다시 만든다. ^IRX를 못 받아 실패해도
+      # 가격 데이터 커밋은 진행한다(합성 파일은 직전 값이 그대로 남는다).
+      - name: Rebuild synthetic TQQQ (1999~)
+        continue-on-error: true
+        run: node scripts/build-sim-tqqq.mjs
+
       - name: Commit and push if changed
         run: |
           git config user.name "tqqq-data-bot"
           git config user.email "actions@users.noreply.github.com"
-          if git diff --quiet -- src/data/tqqq.json src/data/qqq.json src/data/soxl_1h.json src/data/sox.json; then
+          if git diff --quiet -- src/data/tqqq.json src/data/qqq.json src/data/tqqq_sim.json src/data/soxl_1h.json src/data/sox.json; then
             echo "No data changes."
             exit 0
           fi
-          git add src/data/tqqq.json src/data/qqq.json src/data/soxl_1h.json src/data/sox.json
+          git add src/data/tqqq.json src/data/qqq.json src/data/tqqq_sim.json src/data/soxl_1h.json src/data/sox.json
           git commit -m "data: TQQQ·QQQ 가격 데이터 자동 업데이트 $(date -u +%Y-%m-%d)"
           git push

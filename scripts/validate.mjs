@@ -23,7 +23,7 @@ import { runFinalBacktest, DEFAULT_SETTINGS, TQQQ_DATA } from '../src/lib/backte
 
 const QLD_DATA = JSON.parse(fs.readFileSync(new URL('../src/data/qld.json', import.meta.url), 'utf8'));
 // 합성 TQQQ(1999~). 닷컴버블·금융위기가 들어 있는 유일한 데이터.
-// 생성: python scripts/build-sim-tqqq.py
+// 생성: node scripts/build-sim-tqqq.mjs
 const SIM_DATA = JSON.parse(fs.readFileSync(new URL('../src/data/tqqq_sim.json', import.meta.url), 'utf8'));
 
 // 현재 기본 설정을 기준선으로 삼는다.
