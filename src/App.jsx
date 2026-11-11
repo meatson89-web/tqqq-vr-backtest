@@ -510,6 +510,32 @@ function ParametersPanel({ draft, onDraftChange, onApply, dirty }) {
   )
 }
 
+// 날짜를 년·월·일 드롭다운 세 개로 고른다. type="date"는 휴대폰에서 OS 달력/휠이 떠서
+// 2010년까지 한 칸씩 넘겨야 하고 직접 입력도 안 돼 불편했다. 드롭다운은 PC와 휴대폰에서 똑같이 보인다.
+function DateSelect({ value, onChange }) {
+  const [y, m, d] = value.split('-').map(Number)
+  const years = []
+  for (let k = +DATA_START.slice(0, 4); k <= +DATA_END.slice(0, 4); k++) years.push(k)
+  const daysIn = (yy, mm) => new Date(Date.UTC(yy, mm, 0)).getUTCDate()
+  const pad = n => String(n).padStart(2, '0')
+  // 월을 바꿔 그 달에 없는 날(예: 31일 → 2월)이 되면 말일로 맞춘다
+  const set = (yy, mm, dd) => onChange(`${yy}-${pad(mm)}-${pad(Math.min(dd, daysIn(yy, mm)))}`)
+  const range = n => Array.from({ length: n }, (_, i) => i + 1)
+  return (
+    <span className="date-select">
+      <select value={y} onChange={e => set(+e.target.value, m, d)} aria-label="년">
+        {years.map(v => <option key={v} value={v}>{v}년</option>)}
+      </select>
+      <select value={m} onChange={e => set(y, +e.target.value, d)} aria-label="월">
+        {range(12).map(v => <option key={v} value={v}>{v}월</option>)}
+      </select>
+      <select value={d} onChange={e => set(y, m, +e.target.value)} aria-label="일">
+        {range(daysIn(y, m)).map(v => <option key={v} value={v}>{v}일</option>)}
+      </select>
+    </span>
+  )
+}
+
 function CustomRangeForm({ onRun }) {
   const [startDate, setStartDate] = useState(DATA_START)
   const [endDate, setEndDate] = useState(DATA_END)
@@ -528,13 +554,11 @@ function CustomRangeForm({ onRun }) {
       <h3 className="panel-heading" style={{ width: '100%' }}>직접 기간 설정</h3>
       <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#9ca3af' }}>
         시작일
-        <input type="date" value={startDate} min={DATA_START} max={DATA_END}
-          onChange={e => setStartDate(e.target.value)} />
+        <DateSelect value={startDate} onChange={setStartDate} />
       </label>
       <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#9ca3af' }}>
         종료일
-        <input type="date" value={endDate} min={DATA_START} max={DATA_END}
-          onChange={e => setEndDate(e.target.value)} />
+        <DateSelect value={endDate} onChange={setEndDate} />
       </label>
       <button type="submit" className="run-btn" style={{ marginTop: 0, padding: '8px 18px', fontSize: 13 }}>
         기간 조회
