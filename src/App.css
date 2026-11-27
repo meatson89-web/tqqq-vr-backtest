@@ -293,6 +293,17 @@ header .sub {
   .sidebar-toggle, .sidebar.collapsed .sidebar-current { display: none; }
 }
 
+/* 백테스트 차트 확대·이동 */
+.chart-zoom { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin: 4px 0; }
+.chart-zoom span { font-size: 11px; color: #9ca3af; margin-right: auto; }
+.chart-zoom button { font: inherit; font-size: 13px; padding: 3px 10px; min-width: 32px; border-radius: 6px; border: 1px solid #2e303a; background: #16182a; color: #e5e7eb; cursor: pointer; }
+.chart-zoom button:disabled { opacity: .4; cursor: default; }
+.chart-zoom-box { cursor: grab; user-select: none; touch-action: pan-y; }
+.chart-zoom-scroll { display: block; width: calc(100% - 110px); margin: 0 50px 0 60px; height: 14px; appearance: none; -webkit-appearance: none; background: #2e303a; border-radius: 7px; }
+.chart-zoom-scroll:disabled { opacity: .35; }
+.chart-zoom-scroll::-webkit-slider-thumb { -webkit-appearance: none; height: 14px; width: max(24px, var(--thumb)); border-radius: 7px; background: #64748b; cursor: ew-resize; }
+.chart-zoom-scroll::-moz-range-thumb { height: 14px; width: max(24px, var(--thumb)); border: 0; border-radius: 7px; background: #64748b; cursor: ew-resize; }
+
 /* status boards (부스터/매도조건 상황판) */
 .status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-bottom: 14px; }
 .status-item { background: #16182a; border-radius: 6px; padding: 10px 14px; }

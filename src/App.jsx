@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import {
   ResponsiveContainer, ComposedChart, Area, Line, Scatter, ReferenceArea,
   XAxis, YAxis, Tooltip, CartesianGrid,
@@ -679,9 +679,22 @@ function BoosterStatusPanel({ settings }) {
           />
         )}
         <StatusItem label="이번 주 실제 재투자 비율" value={`${s.effectivePoolPct}%`} tone={s.effectivePoolPct < s.basePoolPct ? 'warn' : undefined} />
+      </div>
+      <div className="sub-heading" style={{ textAlign: 'left', marginTop: 4 }}>
+        추세국면 — 나스닥100(QQQ) vs {settings.regimeMaLen}일선 <span style={{ fontWeight: 400, fontSize: 12, color: '#6b7280' }}>(기준일 {rg.date})</span>
+      </div>
+      <div className="status-grid">
+        <StatusItem label="QQQ 최신 종가" value={`$${rg.close.toFixed(2)}`} />
+        <StatusItem label={`QQQ ${settings.regimeMaLen}일선`} value={`$${rg.ma.toFixed(2)}`} />
+        <StatusItem
+          label={`${settings.regimeMaLen}일선 대비`}
+          value={`${rg.gapPct >= 0 ? '+' : ''}${rg.gapPct.toFixed(2)}% (${rg.above ? '선 위' : '선 아래'})`}
+          tone={rg.above ? 'ok' : 'warn'}
+        />
+        {!rg.enabled && <StatusItem label="추세국면 상태" value="필터 꺼짐 (참고용)" />}
         {rg.enabled && (
           <StatusItem
-            label={`추세국면 (나스닥100 ${rg.dwellDays === 1 ? '' : `${rg.dwellDays}일 `}${settings.regimeMaLen}일선)`}
+            label={`추세국면 상태 (${rg.dwellDays === 1 ? '' : `${rg.dwellDays}일 `}${settings.regimeMaLen}일선)`}
             value={!rg.lockedNext
               ? (rg.locked
                 ? `선 위 +${rg.gapPct.toFixed(1)}% · 다음 거래일 해제`
@@ -691,7 +704,7 @@ function BoosterStatusPanel({ settings }) {
                 : rg.above
                   ? `해제 대기 ${rg.nextAboveRun}/${rg.exitDays}일 · 아직 정지`
                   : `이탈 ${rg.nextDwell}일째 · POOL 지출 정지`}
-            tone={rg.locked || rg.lockedNext ? 'warn' : undefined}
+            tone={rg.locked || rg.lockedNext ? 'warn' : 'ok'}
           />
         )}
       </div>
@@ -999,14 +1012,78 @@ function BacktestDetail({ window: win, settings }) {
   // 주식 영역을 구간별로 다른 색으로 칠하기 위한 가로 그라디언트 stop 목록.
   // 전환 지점마다 같은 offset에 stop을 두 개 찍어 색이 그라데이션 없이 딱 끊기게 한다.
   // (Recharts의 Area는 하나의 path라서 색을 나누려면 이 방법뿐이다.)
+  // 가로 확대·이동: 보이는 구간 = chartData 인덱스 [a, b]. 기간이 바뀌면 전체 보기로 돌아간다.
+  const N = chartData.length
+  const [viewState, setViewState] = useState({ key: chartData, v: [0, N - 1] })
+  const view = viewState.key === chartData ? viewState.v : [0, N - 1]
+  const full = view[0] === 0 && view[1] === N - 1
+  const clampView = (a, b) => {
+    const len = Math.round(Math.min(N - 1, Math.max(Math.min(N - 1, 20), b - a)))
+    a = Math.round(Math.max(0, Math.min(N - 1 - len, a)))
+    return [a, a + len]
+  }
+  const setView = fn => setViewState(st => {
+    const cur = st.key === chartData ? st.v : [0, N - 1]
+    return { key: chartData, v: typeof fn === 'function' ? fn(cur) : fn }
+  })
+  // 중심 c(인덱스)를 고정하고 f배로 넓히거나 좁힌다
+  const zoom = (f, c) => setView(([a, b]) => { c ??= (a + b) / 2; return clampView(c - (c - a) * f, c + (b - c) * f) })
+  const boxRef = useRef(null)
+  const viewRef = useRef(view); viewRef.current = view
+  const zoomRef = useRef(null); zoomRef.current = { zoom, setView, clampView }
+  useEffect(() => {
+    const el = boxRef.current
+    if (!el) return
+    // 플롯 영역 = 왼쪽 축 55 + 오른쪽 축 45 + 기본 여백 5씩
+    const PLOT_L = 60, PLOT_R = 50
+    const plotW = () => Math.max(1, el.getBoundingClientRect().width - PLOT_L - PLOT_R)
+    // 휠: 위아래 = 커서 위치를 중심으로 확대·축소, 좌우(트랙패드 또는 Shift+휠) = 이동
+    const onWheel = ev => {
+      ev.preventDefault()
+      const [a, b] = viewRef.current
+      const { zoom, setView, clampView } = zoomRef.current
+      const dx = ev.shiftKey ? ev.deltaY : ev.deltaX, dy = ev.shiftKey ? 0 : ev.deltaY
+      if (Math.abs(dx) > Math.abs(dy)) { const d = dx / plotW() * (b - a); setView(clampView(a + d, b + d)); return }
+      const fx = Math.min(1, Math.max(0, (ev.clientX - el.getBoundingClientRect().left - PLOT_L) / plotW()))
+      zoom(Math.exp(dy * 0.0015), a + fx * (b - a))
+    }
+    // 마우스로 끌어서 좌우 이동
+    let drag = null
+    const down = ev => { if (ev.pointerType === 'mouse' && ev.button === 0) { drag = { x: ev.clientX, v: viewRef.current }; el.style.cursor = 'grabbing' } }
+    const move = ev => {
+      if (!drag) return
+      const [a, b] = drag.v, d = (ev.clientX - drag.x) / plotW() * (b - a)
+      const { setView, clampView } = zoomRef.current
+      setView(clampView(a - d, b - d))
+    }
+    const up = () => { drag = null; el.style.cursor = '' }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    el.addEventListener('pointerdown', down)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('pointerdown', down)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+  }, [])
+  const shown = useMemo(() => chartData.slice(view[0], view[1] + 1), [chartData, view[0], view[1]])
+  // 음영 구간을 보이는 범위로 자른다(범주형 축이라 범위 밖 날짜는 그려지지 않는다)
+  const clipRanges = ranges => {
+    if (!shown.length) return []
+    const lo = shown[0].date, hi = shown[shown.length - 1].date
+    return ranges.filter(([s, e]) => e >= lo && s <= hi).map(([s, e]) => [s < lo ? lo : s, e > hi ? hi : e])
+  }
+
   const stockStops = useMemo(() => {
-    const n = chartData.length
+    const n = shown.length
     if (!n) return []
-    if (n === 1) return [{ offset: 0, hot: !!chartData[0].hot }, { offset: 1, hot: !!chartData[0].hot }]
-    const stops = [{ offset: 0, hot: !!chartData[0].hot }]
-    let prev = !!chartData[0].hot
+    if (n === 1) return [{ offset: 0, hot: !!shown[0].hot }, { offset: 1, hot: !!shown[0].hot }]
+    const stops = [{ offset: 0, hot: !!shown[0].hot }]
+    let prev = !!shown[0].hot
     for (let i = 1; i < n; i++) {
-      const hot = !!chartData[i].hot
+      const hot = !!shown[i].hot
       if (hot !== prev) {
         const off = i / (n - 1)
         stops.push({ offset: off, hot: prev }, { offset: off, hot })
@@ -1015,7 +1092,7 @@ function BacktestDetail({ window: win, settings }) {
     }
     stops.push({ offset: 1, hot: prev })
     return stops
-  }, [chartData])
+  }, [shown])
   const hasHot = useMemo(() => stockStops.some(s => s.hot), [stockStops])
 
   // 부스터/완화매도 on-off 4가지 조합을 한번에 비교 (체크박스 일일이 바꿔가며
@@ -1122,8 +1199,15 @@ function BacktestDetail({ window: win, settings }) {
         </tbody>
       </table>
 
+      <div className="chart-zoom">
+        <span>휠 = 확대·축소 · 끌기 또는 아래 막대 = 좌우 이동{!full && shown.length > 0 && ` · ${shown[0].date} ~ ${shown[shown.length - 1].date}`}</span>
+        <button type="button" onClick={() => zoom(0.6)} aria-label="확대">＋</button>
+        <button type="button" onClick={() => zoom(1 / 0.6)} aria-label="축소">−</button>
+        <button type="button" onClick={() => setView([0, N - 1])} disabled={full}>전체 보기</button>
+      </div>
+      <div ref={boxRef} className="chart-zoom-box">
       <ResponsiveContainer width="100%" height={380}>
-        <ComposedChart data={chartData}>
+        <ComposedChart data={shown}>
           <defs>
             <linearGradient id="stockSplit" x1="0" y1="0" x2="1" y2="0">
               {stockStops.map((st, i) => (
@@ -1136,10 +1220,10 @@ function BacktestDetail({ window: win, settings }) {
           <YAxis tickFormatter={v => `${(v / 1e8).toFixed(1)}억`} width={55} />
           <YAxis yAxisId="price" orientation="right" tickFormatter={v => `$${v.toFixed(0)}`} width={45} stroke={PRICE_COLOR} />
           <Tooltip content={<CustomTooltip />} />
-          {regimeRanges.map(([s, e]) => (
+          {clipRanges(regimeRanges).map(([s, e]) => (
             <ReferenceArea key={`rg-${s}-${e}`} x1={s} x2={e} fill={REGIME_COLOR} fillOpacity={0.22} strokeOpacity={0} ifOverflow="visible" />
           ))}
-          {boostRanges.map(([s, e]) => (
+          {clipRanges(boostRanges).map(([s, e]) => (
             <ReferenceArea key={`${s}-${e}`} x1={s} x2={e} fill="#f59e0b" fillOpacity={0.14} strokeOpacity={0} ifOverflow="visible" />
           ))}
           <Area
@@ -1165,7 +1249,12 @@ function BacktestDetail({ window: win, settings }) {
           <Scatter dataKey="sell" shape={<SellDot />} isAnimationActive={false} />
         </ComposedChart>
       </ResponsiveContainer>
-      <div style={{ fontSize: 12, color: '#9ca3af', marginTop: -18, marginBottom: 18, display: 'flex', gap: 18, flexWrap: 'wrap' }}>
+      </div>
+      <input type="range" className="chart-zoom-scroll" min={0} max={Math.max(0, N - 1 - (view[1] - view[0]))} value={view[0]}
+        disabled={full} aria-label="차트 좌우 이동"
+        style={{ '--thumb': `${((view[1] - view[0]) / Math.max(1, N - 1)) * 100}%` }}
+        onChange={e => { const a = Number(e.target.value); setView(([x, y]) => clampView(a, a + (y - x))) }} />
+      <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 8, marginBottom: 18, display: 'flex', gap: 18, flexWrap: 'wrap' }}>
           <span>
             <span style={{ display: 'inline-block', width: 14, borderTop: `2px dashed ${PRICE_COLOR}`, marginRight: 6, verticalAlign: 'middle' }} />
             파란 점선 = TQQQ 가격 (오른쪽 축, $)
